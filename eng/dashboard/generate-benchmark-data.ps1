@@ -8,6 +8,10 @@
     benchmark dashboard. If an existing JSON file is provided, the new data point
     is appended to the existing history.
 
+    When -PurgeStaleFiles is used, scans a data directory for plugin JSON files and
+    removes entries older than the retention window. Files left with no entries are
+    deleted so they are excluded from the components.json manifest.
+
 .PARAMETER ResultsFile
     Path to the skill-validator results.json file.
 
@@ -22,27 +26,76 @@
 
 .PARAMETER CommitJson
     Optional JSON string with commit info (id, message, author, timestamp, url).
+
+.PARAMETER PurgeStaleFiles
+    When set, scans DataDir for plugin JSON files, purges entries older than the
+    retention window, and deletes files that have no remaining entries.
+
+.PARAMETER DataDir
+    Directory containing plugin JSON files to purge. Required with -PurgeStaleFiles.
+
+.PARAMETER RetentionDays
+    Number of days of data to retain. Entries older than this are purged. Required for the
+    Purge parameter set; optional for the Generate parameter set (no default value).
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Generate')]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Generate')]
     [string]$ResultsFile,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Generate')]
     [string]$PluginName,
 
-    [Parameter()]
+    [Parameter(ParameterSetName = 'Generate')]
     [string]$OutputDir,
 
-    [Parameter()]
+    [Parameter(ParameterSetName = 'Generate')]
     [string]$ExistingDataFile,
 
-    [Parameter()]
-    [string]$CommitJson
+    [Parameter(ParameterSetName = 'Generate')]
+    [string]$CommitJson,
+
+    [Parameter(Mandatory, ParameterSetName = 'Purge')]
+    [switch]$PurgeStaleFiles,
+
+    [Parameter(Mandatory, ParameterSetName = 'Purge')]
+    [string]$DataDir,
+
+    [Parameter(Mandatory, ParameterSetName = 'Purge')]
+    [Parameter(ParameterSetName = 'Generate')]
+    [int]$RetentionDays
 )
 
 $ErrorActionPreference = "Stop"
 
+# --- Purge mode: scan a data directory and remove stale files ---
+if ($PurgeStaleFiles) {
+    $cutoffMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$RetentionDays * 24 * 60 * 60 * 1000)
+    $dataFiles = Get-ChildItem -Path $DataDir -Filter "*.json" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne "components.json" }
+    foreach ($file in $dataFiles) {
+        try {
+            $data = Get-Content $file.FullName -Raw | ConvertFrom-Json -AsHashtable
+            $hasRecentEntries = $false
+            if (-not $data -or -not $data['entries']) { continue }
+            foreach ($category in $data['entries'].Keys) {
+                $data['entries'][$category] = @($data['entries'][$category] | Where-Object { $_.date -ge $cutoffMs })
+                if ($data['entries'][$category].Count -gt 0) { $hasRecentEntries = $true }
+            }
+            if (-not $hasRecentEntries) {
+                Remove-Item $file.FullName -Force
+                Write-Host "[REMOVED] $($file.Name) — all entries older than $RetentionDays days"
+            } else {
+                $data | ConvertTo-Json -Depth 10 | Out-File -FilePath $file.FullName -Encoding utf8
+            }
+        } catch {
+            Write-Warning "Failed to process $($file.Name) for purge: $_"
+        }
+    }
+    exit 0
+}
+
+# --- Generate mode: produce per-plugin benchmark data ---
 if (-not $OutputDir) {
     $OutputDir = Split-Path $ResultsFile -Parent
 }
@@ -106,15 +159,19 @@ foreach ($verdict in $results.verdicts) {
             # When breakdowns exist we use them; when they don't (older schema)
             # we fall back to the verdict-level flag for every scenario.
             $hasBreakdowns = $verdict.overfittingResult.PSObject.Properties['rubricAssessments'] -or
-                             $verdict.overfittingResult.PSObject.Properties['assertionAssessments']
+                             $verdict.overfittingResult.PSObject.Properties['assertionAssessments'] -or
+                             $verdict.overfittingResult.PSObject.Properties['promptAssessments']
 
             if ($hasBreakdowns) {
                 $rubrics    = $verdict.overfittingResult.rubricAssessments    | Where-Object { $_.scenario -eq $scenarioName }
                 $assertions = $verdict.overfittingResult.assertionAssessments | Where-Object { $_.scenario -eq $scenarioName }
+                $prompts    = $verdict.overfittingResult.promptAssessments    | Where-Object { $_.scenario -eq $scenarioName }
                 # Rubric classifications: outcome | technique | vocabulary  — flag non-outcome.
                 # Assertion classifications: broad | narrow               — flag narrow.
+                # Prompt issues: any prompt assessment for this scenario is a flag.
                 $scenarioHasIssues = ($rubrics    | Where-Object { $_.classification -ne "outcome" }) -or
-                                     ($assertions | Where-Object { $_.classification -eq "narrow" })
+                                     ($assertions | Where-Object { $_.classification -eq "narrow" }) -or
+                                     ($prompts   | Measure-Object).Count -gt 0
                 if ($scenarioHasIssues) {
                     $overfittingSeverity = $verdict.overfittingResult.severity.ToLower()
                     $overfittingScore = $verdict.overfittingResult.score
@@ -256,6 +313,22 @@ if (-not $benchmarkData['entries'][$efficiencyKey]) {
 
 $benchmarkData['entries'][$qualityKey] += @($qualityEntry)
 $benchmarkData['entries'][$efficiencyKey] += @($efficiencyEntry)
+
+# Purge entries older than the retention window
+if ($RetentionDays -gt 0) {
+    $cutoffMs = $now - ([long]$RetentionDays * 24 * 60 * 60 * 1000)
+
+    foreach ($key in @($qualityKey, $efficiencyKey)) {
+        $before = $benchmarkData['entries'][$key].Count
+        $benchmarkData['entries'][$key] = @($benchmarkData['entries'][$key] | Where-Object {
+            $_.date -ge $cutoffMs
+        })
+        $purged = $before - $benchmarkData['entries'][$key].Count
+        if ($purged -gt 0) {
+            Write-Host "   Purged $purged $key entries older than $RetentionDays days"
+        }
+    }
+}
 
 # Write <PluginName>.json
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

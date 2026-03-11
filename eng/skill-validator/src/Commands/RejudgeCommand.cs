@@ -147,8 +147,8 @@ public static class RejudgeCommand
                     var baselineSess = runGroup.First(s => s.Role == "baseline");
                     var skillSess = runGroup.First(s => s.Role == "with-skill");
 
-                    var baselineMetrics = JsonSerializer.Deserialize<RunMetrics>(baselineSess.MetricsJson!, jsonOpts)!;
-                    var withSkillMetrics = JsonSerializer.Deserialize<RunMetrics>(skillSess.MetricsJson!, jsonOpts)!;
+                    var baselineMetrics = JsonSerializer.Deserialize(baselineSess.MetricsJson!, SkillValidatorJsonContext.Default.RunMetrics)!;
+                    var withSkillMetrics = JsonSerializer.Deserialize(skillSess.MetricsJson!, SkillValidatorJsonContext.Default.RunMetrics)!;
 
                     // Reconstruct scenario for judge (we need rubric)
                     // For now, create a minimal scenario from the saved data
@@ -164,8 +164,8 @@ public static class RejudgeCommand
                     var withSkillResult = new RunResult(withSkillMetrics, judgeTasks[1]);
 
                     // Update judge results in DB
-                    sessionDb.SaveJudgeResult(baselineSess.Id, JsonSerializer.Serialize(judgeTasks[0]));
-                    sessionDb.SaveJudgeResult(skillSess.Id, JsonSerializer.Serialize(judgeTasks[1]));
+                    sessionDb.SaveJudgeResult(baselineSess.Id, JsonSerializer.Serialize(judgeTasks[0], SkillValidatorJsonContext.Default.JudgeResult));
+                    sessionDb.SaveJudgeResult(skillSess.Id, JsonSerializer.Serialize(judgeTasks[1], SkillValidatorJsonContext.Default.JudgeResult));
 
                     // Pairwise
                     PairwiseJudgeResult? pairwise = null;
@@ -176,7 +176,7 @@ public static class RejudgeCommand
                             pairwise = await PairwiseJudge.Judge(
                                 scenario, baselineMetrics, withSkillMetrics,
                                 new PairwiseJudgeOptions(effectiveJudgeModel, verbose, judgeTimeout, baselineMetrics.WorkDir, firstSession.SkillPath));
-                            sessionDb.SavePairwiseResult(baselineSess.Id, JsonSerializer.Serialize(pairwise));
+                            sessionDb.SavePairwiseResult(baselineSess.Id, JsonSerializer.Serialize(pairwise, SkillValidatorJsonContext.Default.PairwiseJudgeResult));
                         }
                         catch (Exception error)
                         {
