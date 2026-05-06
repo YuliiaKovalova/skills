@@ -38,18 +38,19 @@ Based on the request scope, pick exactly one strategy and follow it:
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
-**Default to Direct** unless the request explicitly mentions multiple files, modules, or an entire project. Most test generation requests — including "generate tests for function X", "add tests covering these scenarios", and "write unit tests for this class" — should use Direct strategy. The full Research → Plan → Implement pipeline is only needed when the scope spans multiple unrelated source files.
+**Default to Single pass.** Even seemingly small requests — "write tests for this function", "add tests for this class", "generate tests for `src/InvoiceService.cs`" — should run through the Research → Plan → Implement pipeline. The cost of an extra researcher / planner hop is small; the cost of bypassing them is silent loss of project-convention discovery (test framework, naming patterns, project references) that the sub-agents are specifically trained to extract. Use **Direct** only when the user explicitly opts out of the pipeline (e.g., "skip the pipeline", "don't use sub-agents", "just write the test inline"). Use **Iterative** for large scope (10+ source files in scope, or a whole-solution coverage goal).
 
 **Strategy decision examples:**
 
 | User request | Strategy | Reasoning |
 |---|---|---|
-| "Write tests for `src/InvoiceService.cs`" | Direct | Single file, can write tests immediately without sub-agents |
-| "Generate tests for the billing module" | Single pass | Moderate scope (handful of files), one R→P→I cycle covers it |
+| "Write tests for `src/InvoiceService.cs`" | Single pass | One R→P→I cycle picks up the project's test framework, naming convention, and existing patterns — even for one file |
+| "Add tests for this function" (with file open) | Single pass | The researcher needs ~one tool call to confirm conventions; planner emits a one-phase plan; implementer writes the test |
+| "Generate tests for the billing module" | Single pass | Moderate scope, one R→P→I cycle covers it |
 | "Achieve 80% coverage across the whole solution" | Iterative | Large scope, first pass covers the obvious gaps, subsequent passes target remaining uncovered code |
-| "Add tests for this function" (with file open) | Direct | Single function is trivially small scope |
 | "Generate comprehensive tests for my ASP.NET app" | Single pass | If the app has fewer than 10 controllers/services/files in scope, one R→P→I cycle should cover it |
 | "Generate comprehensive tests for my large ASP.NET app" | Iterative | If the app has 10 or more controllers/services/files in scope, use repeated passes to close remaining gaps |
+| "Just write the test inline, no pipeline" | Direct | User explicitly opted out of sub-agents |
 
 **All strategies MUST execute Steps 6-9** (final build validation, final test validation, coverage gap iteration, and reporting). These steps are never skipped.
 
