@@ -32,12 +32,18 @@ Understand what the user wants: scope (project, files, classes), priority areas,
 
 **Always start with the Research → Plan → Implement pipeline.** The researcher and planner sub-agents discover project conventions (test framework, naming patterns, build commands, existing test structure) that you cannot reliably infer on your own. Skipping them leads to tests that compile but miss project patterns.
 
+You CANNOT write any test code until BOTH of these files exist:
+- `.testagent/research.md` (created by `code-testing-researcher`)
+- `.testagent/plan.md` (created by `code-testing-planner`)
+
+If these files don't exist, your ONLY valid action is to create them by calling the sub-agents.
+
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
 | **Single pass** | **Default for all requests** — including single-file, single-function, and single-class scope | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | Large scope (10+ source files) or ambitious coverage target | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus. Use unique names for iteration docs (e.g., `research-2.md`, `plan-2.md`). |
 
-> **Why no Direct strategy?** Earlier versions offered a "Direct" path that skipped research and planning. Benchmarking showed this produced tests with lower mutation detection (tests that don't catch real bugs) and missed project conventions. The overhead of one researcher + planner call is ~10 seconds; the quality improvement is measurable. Direct is only appropriate if the user explicitly says "skip the pipeline" or "just write the test inline."
+> **Why no Direct strategy?** Direct was removed after benchmarking showed it produced tests with lower mutation detection and missed project conventions. The pipeline is mandatory for all requests.
 
 **Strategy decision examples:**
 
@@ -47,9 +53,26 @@ Understand what the user wants: scope (project, files, classes), priority areas,
 | "Add tests for this function" | Single pass | Even for one function, the researcher discovers the test framework and patterns |
 | "Generate tests for the billing module" | Single pass | Moderate scope, one R→P→I cycle covers it |
 | "Achieve 80% coverage across the whole solution" | Iterative | Large scope, multiple passes needed |
-| "Skip the pipeline, just write the test" | Single pass (without sub-agents) | User explicitly opted out — write tests directly, still run Steps 6-9 |
+
+<example>
+User: "Write tests for src/InvoiceService.cs"
+
+My first action:
+runSubagent({
+  agent: "code-testing-researcher",
+  prompt: "Research the codebase at [workspace] for test generation. Identify: project structure, existing tests, source files to test, testing framework, build/test commands."
+})
+
+NOT: writing tests directly.
+NOT: reading source files before calling researcher.
+NOT: using edit/create tools to write test files — only code-testing-implementer creates test files.
+</example>
 
 **All strategies MUST execute Steps 6-9** (final build validation, final test validation, coverage gap iteration, and reporting). These steps are never skipped.
+
+### ⛔ REQUIRED FIRST ACTION — do not skip
+
+Before reading any source files, writing any code, or doing anything else, your very first action MUST be calling `code-testing-researcher` as a sub-agent (Step 3 below). You MUST NOT write test code directly. The only path to producing tests is through code-testing-researcher → code-testing-planner → code-testing-implementer.
 
 ### Step 3: Research Phase
 
@@ -178,3 +201,4 @@ All state is stored in `.testagent/` folder:
 10. **Read language extensions first** — always call the `code-testing-extensions` skill and read the relevant extension file before writing any code; it contains critical project registration and build validation steps
 11. **Always validate** — final build, final test, coverage-gap review, and reporting are mandatory on every run; never skip final validation
 12. **Preserve existing tests** — never delete or overwrite existing test files; create new files or append to existing ones
+13. **Never write tests directly** — You MUST NOT use `edit`, `create`, or any file-writing tool to produce test files yourself. Test files are ONLY created by `code-testing-implementer`. Your very first tool call for any test generation request MUST be `runSubagent` calling `code-testing-researcher`.
