@@ -142,7 +142,7 @@ The generator picks a strategy based on request scope:
 
 | User Request | Strategy | Why |
 |---|---|---|
-| "Generate tests for `src/services/UserService.ts`" | **Direct** | Single file, small scope — write tests immediately, skip sub-agents |
+| "Generate tests for `src/services/UserService.ts`" | **Single pass** | One Research → Plan → Implement cycle picks up the project's test framework, naming convention, and existing patterns — even for a single file |
 | "Add unit tests for my billing project" | **Single pass** | Moderate scope — one Research → Plan → Implement cycle covers it |
 | "Achieve 80% coverage across the entire solution" | **Iterative** | Large scope — multiple R→P→I cycles, each narrowing remaining gaps |
 
