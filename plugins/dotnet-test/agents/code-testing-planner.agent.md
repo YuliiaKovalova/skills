@@ -68,6 +68,17 @@ For each file in each phase, specify:
 - Methods/functions to test
 - Key test scenarios (happy path, edge cases, errors)
 
+**Test file location rules** — the implementer will only modify files that match these rules. Choose paths the implementer is allowed to write.
+
+- **Allowed test directories**: `tests/`, `test/`, `__tests__/`, `*.Tests/`, or files matching `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.py`.
+- **Forbidden file targets**: never schedule edits to `*.env`, `*.cfg`, `*.ini`, `*.toml`, `*.yaml`, `*.yml`, root-level `package.json`, root-level `Cargo.toml`, `go.mod`, `Dockerfile`, `docker-compose.*`, or any source file outside a test directory. If a test seems to need such a file, plan a mock instead.
+- **Naming decision tree**:
+  - If the user task or rubric names a specific test-file path, use exactly that path.
+  - Else, if the target is one named function with no existing test file, create a new file: `test_<function_name>.<ext>` (Python), `<FunctionName>.test.<ext>` (JS/TS), `<FunctionName>Tests.<ext>` (.NET).
+  - Else, if there is an existing test file that already covers the module/class, append the new tests to that file rather than creating a new one.
+
+**Test scenario depth** — when listing scenarios per method, the implementer is required to use inputs with N >= 3 elements for collection-handling functions and to assert on full equality of the result (not type-only checks). Reflect that in your scenario list: instead of "happy path: returns dict", write "happy path: input [{id:1,name:'A'},{id:2,name:'B'},{id:3,name:'C'}] yields keyed result {1:..., 2:..., 3:...}".
+
 **Important**: When adding new tests, they MUST go into the existing test project that already tests the target code. Do not create a separate test project unnecessarily. If no existing test project covers the target, create a new one.
 
 ### 5. Generate Plan Document

@@ -46,7 +46,9 @@ This applies to every request, including ones that look like they target a singl
 | 5 | Build the workspace | `task: code-testing-builder` |
 | 6 | Run the tests | `task: code-testing-tester` |
 | 7 | Fix failures (if any) | `task: code-testing-fixer` |
-| 8 | Report results | text output, no tool call |
+| 8 | Coverage gap iteration (optional) | re-dispatch researcher/planner/implementer with narrowed focus |
+| 9 | Validate diff and clean up | `task: code-testing-builder` (cleanup prompt) |
+| 10 | Report results | text output, no tool call |
 
 Sub-agents share state via `.testagent/`:
 
@@ -56,13 +58,17 @@ Sub-agents share state via `.testagent/`:
 
 You do not need to read these files yourself. Each sub-agent's `task` return summarizes what it produced and tells you what to do next.
 
-## Step 1: Load language extension
+## Step 1: Load language extension and default conventions
 
 ```text
 skill({ skill: "code-testing-extensions" })
 ```
 
 This skill exposes language-specific extension files (e.g., `dotnet.md` for .NET, `cpp.md` for C++). The skill response will tell you which extensions are available. Note the relevant one — you will pass its name to the implementer in Step 4 so it can apply language-specific build commands, project registration steps, and error-handling guidance.
+
+For default test conventions (coverage goals, naming, what counts as a good test), the implementer/planner sub-agents will consult `unit-test-generation.prompt.md` from the `code-testing-agent` skill. You do not need to read it yourself — pass the requirement to read it into the planner prompt below.
+
+**Before dispatching the researcher**, the researcher will run `git status` and stash any pre-existing changes so the final patch contains only what the pipeline produces. You do not run git yourself; this is part of the researcher's standard preamble.
 
 ## Step 2: Dispatch researcher
 
@@ -90,13 +96,26 @@ The planner produces `.testagent/plan.md`. Its return tells you how many phases 
 
 ## Step 4: Dispatch implementer for each phase
 
-For each phase listed in the plan, dispatch the implementer once, sequentially:
+For each phase listed in the plan, dispatch the implementer once, sequentially. **Pass the test-strength requirements explicitly** — these are what separates tests that "compile and pass" from tests that "catch the bugs they are supposed to catch":
 
 ```text
 task({
   agent_type: "dotnet-test:code-testing-implementer",
   name: "implementer",
-  prompt: "Implement Phase N from .testagent/plan.md: [phase description from planner return]. Apply the language-specific guidance from the [dotnet.md|cpp.md|...] extension. Ensure tests compile and pass."
+  prompt: "Implement Phase N from .testagent/plan.md: [phase description from planner return]. Apply the language-specific guidance from the [dotnet.md|cpp.md|...] extension.
+
+  TEST STRENGTH REQUIREMENTS (mandatory):
+  - Each test must assert on CONCRETE expected values, not type checks or non-null checks. A test that would still pass if the function under test returned a default value is too weak — rewrite it.
+  - For functions over collections, use inputs with N >= 3 elements (not 1) so iteration, ordering, and key-collision bugs are exposed.
+  - Use full-equality assertions (toEqual / Assert.Equal on the entire result object) rather than per-field spot checks.
+  - Avoid: .toBeTruthy(), .not.toThrow() as the only assertion, single-element collection inputs, asserting only the type of the result.
+
+  FILE-LOCATION RULES (mandatory):
+  - Create or modify ONLY files inside test directories: tests/, test/, __tests__/, *.test.*, *.spec.*, *_test.go, *_test.py, *.Tests/.
+  - NEVER modify environment, configuration, or infrastructure files: *.env, *.cfg, *.ini, *.toml, *.yaml, *.yml, package.json, Cargo.toml, go.mod, *.csproj (unless adding the test project itself), Dockerfile, docker-compose.*.
+  - If the plan names a specific test-file path, use exactly that path. Otherwise: if the rubric is testing one named function, create a new file named after that function (e.g. test_<function_name>.py); if the rubric is extending coverage of an existing module that already has a test file, append to that existing test file.
+
+  Ensure tests compile and pass."
 })
 ```
 
@@ -138,7 +157,50 @@ task({
 })
 ```
 
-## Step 8: Report results
+## Step 8: Coverage gap iteration (optional but recommended)
+
+Before validating and reporting, ask whether any rubric criteria, named source files, or named functions in the original user task are still uncovered. Sub-agents return summaries; check whether the implementer reported all rubric items as addressed. If anything is still uncovered:
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-researcher",
+  name: "researcher-gap",
+  prompt: "Re-research scoped to: [specific uncovered files/functions/rubric items]. Write findings to .testagent/research-2.md."
+})
+```
+
+Then re-run planner (writing `.testagent/plan-2.md`) and implementer for the gap phase, followed by builder/tester/fixer cycles. Do this at most once per run; if the second iteration also leaves gaps, list them in the final report rather than looping further.
+
+## Step 9: Validate diff and clean up
+
+Before reporting success, dispatch the builder sub-agent (it has terminal and edit access) to verify the patch contains only legitimate test changes and to remove pipeline scratch state:
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-builder",
+  name: "validator",
+  prompt: "Final validation and cleanup. Do these steps in order and report results:
+
+  1. Run 'rm -rf .testagent/' (or the platform equivalent) to remove pipeline scratch state. If the directory does not exist, that is fine.
+
+  2. Run 'git status --porcelain' and 'git diff --name-only HEAD' to list every file the pipeline touched.
+
+  3. Classify each touched file:
+     - TEST FILE: inside tests/, test/, __tests__/, *.Tests/, or matches *.test.*, *.spec.*, *_test.go, *_test.py — keep.
+     - TEST PROJECT FILE: a *.csproj/*.fsproj/package.json/etc. inside a test directory that was modified to register the new test file — keep.
+     - SUSPICIOUS: anything else, especially *.env, *.cfg, *.ini, *.toml, *.yaml, *.yml, root-level package.json, Cargo.toml, go.mod, Dockerfile, docker-compose.*, source files outside test directories.
+
+  4. For every SUSPICIOUS file: run 'git checkout HEAD -- <file>' to revert it unless the original task explicitly required modifying it. List each reverted file.
+
+  5. Run 'git status --porcelain' again and report the final file list.
+
+  Return: list of kept files, list of reverted files, list of any SUSPICIOUS files left in place (with reason). Do NOT commit; the harness captures the working tree."
+})
+```
+
+If the validator reports SUSPICIOUS files left in place that you did not authorize, dispatch it again with explicit instructions to revert them.
+
+## Step 10: Report results
 
 Output a text summary in your final assistant message. No tool call.
 
@@ -174,7 +236,7 @@ All inter-agent state lives in `.testagent/`. Sub-agents read and write these fi
 - `.testagent/plan.md` — planner output
 - `.testagent/status.md` — optional progress tracking
 
-Instruct the final implementer (or a fixer call) to clean up `.testagent/` before completion, or note in your final report that the user should add it to `.gitignore`.
+`.testagent/` is removed by the Step 9 validator dispatch. Do not skip Step 9 — leftover `.testagent/` files in the final patch break benchmark manifest checks.
 
 ## Iterative mode (large scope only)
 
@@ -193,7 +255,8 @@ This is the **only** form of deviation from the linear pipeline that is permitte
 7. **Fix assertions, never skip** — `[Ignore]`/`[Skip]` is forbidden in fixer prompts. Read production code, correct expected values.
 8. **Final validation is mandatory** — builder and tester must run on every pipeline; never skip.
 9. **Preserve existing tests** — instruct implementer to never delete or overwrite existing test files; create new files or append.
-10. **Clean up `.testagent/`** — instruct the final sub-agent to delete the folder, or note it in the user-facing report.
+10. **Clean up and diff-validate** — Step 9 (dispatch builder as validator) is mandatory. It removes `.testagent/` and reverts any non-test files the implementer touched (env files, configs, root-level project files). Skipping it produces patches that fail benchmark manifest checks and patches that contain unintended collateral changes.
+11. **Test strength is preventative, not post-hoc** — the test-strength rubric (concrete-value assertions, N>=3 collection inputs, full-equality comparisons, no .toBeTruthy()-only tests) belongs in the **implementer** prompt at Step 4, not in the tester prompt at Step 6. By the time the tester runs, weak tests are already written and the fixer cannot strengthen them without re-deriving expected values.
 
 ## Why this design
 
