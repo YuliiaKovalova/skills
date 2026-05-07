@@ -51,31 +51,6 @@ For each test file in your phase:
 - Include tests for: happy path, edge cases (empty, null, boundary), error conditions
 - Mock all external dependencies — never call external URLs, bind ports, or depend on timing
 
-#### 4a. Test strength requirements (mandatory)
-
-These rules separate tests that "compile and pass" from tests that **catch the bugs they were written to catch**. A test that would still pass if the function under test returned a default/empty/identity value is too weak — rewrite it.
-
-- **Assert on concrete expected values, not types or non-null checks.** Bad: `assert isinstance(result, dict)`, `expect(result).toBeTruthy()`, `Assert.NotNull(result)`. Good: `assert result == {"a": 1, "b": 2}`, `expect(result).toEqual({a:1, b:2})`, `Assert.Equal(expected, result)`.
-- **Use full-equality assertions on the entire result object** rather than spot-checking individual fields. Bad: `assert result["count"] == 3`. Good: `assert result == {"count": 3, "items": [...], "next_token": None}`.
-- **For functions over collections, use inputs with N >= 3 elements**, not 1. Single-element inputs cannot expose iteration order, key collisions, accumulator-reset bugs, or "first item special-cased" bugs. Bad: `keyBy([{id:1, name:'A'}], 'id')`. Good: `keyBy([{id:1, name:'A'}, {id:2, name:'B'}, {id:3, name:'C'}], 'id')` plus a separate test with collision (`{id:1, name:'A'}, {id:1, name:'B'}` — last one wins).
-- **For property-name-based iteratees, include reserved-name keys** like `'constructor'`, `'hasOwnProperty'`, `'__proto__'` to catch prototype-pollution bugs.
-- **For predicates and comparators, test both true and false branches** with at least one input each.
-- **Avoid as the only assertion in a test:** `.toBeTruthy()`, `.toBeDefined()`, `.not.toBeNull()`, `.not.toThrow()`, `Assert.NotNull(...)`, `assert result is not None`, type-only checks.
-- **Mutation-resistance check**: before submitting a test, ask yourself "would this test still pass if I deleted the body of the function under test and made it `return None` / `return {}` / `return []`?" If yes, the test is too weak — strengthen the assertion.
-
-#### 4b. File-location and side-effect rules (mandatory)
-
-The benchmark scores only test changes; modifications to environment, configuration, or build files cause the patch to be rejected as "test changes contain unrelated edits".
-
-- **Write only inside test directories**: `tests/`, `test/`, `__tests__/`, `*.Tests/`, or files matching `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.py`.
-- **Never modify** these even if a test seems to need them: `*.env`, `*.cfg`, `*.ini`, `*.toml`, `*.yaml`, `*.yml`, root-level `package.json`, root-level `Cargo.toml`, `go.mod`, `Dockerfile`, `docker-compose.*`, source files outside test directories. If a test appears to need a config change to run, mock the dependency in the test instead.
-- **Test project files** (`*.csproj`, `*.fsproj`, test-directory `package.json`) may be modified only to register the test file you just created — never to add new runtime dependencies, change target frameworks, or alter unrelated settings.
-- **File-naming decision tree**:
-  - If the plan or task names a specific test-file path, use exactly that path.
-  - Else, if you are testing one named function and no existing test file covers it, create a new file named after the function: `test_<function_name>.<ext>` (Python), `<FunctionName>.test.<ext>` (JS/TS), `<FunctionName>Tests.<ext>` (.NET).
-  - Else, if there is an existing test file that already covers the module/class containing the function, append your tests to that file rather than creating a new one.
-- **Never delete or overwrite an existing test.** Append, don't replace.
-
 ### 5. Verify with Build
 
 Call the `code-testing-builder` sub-agent to compile. Build only the specific test project, not the full solution.
@@ -100,17 +75,7 @@ If tests fail:
 
 ### 7. Format Code (mandatory if a lint command exists)
 
-Call the `code-testing-linter` sub-agent unless the project has no lint/format command at all. Pass the lint command discovered by the researcher (`.testagent/research.md` Commands section).
-
-```text
-task({
-  agent_type: "dotnet-test:code-testing-linter",
-  name: "linter",
-  prompt: "Run the project's lint/format command on the test files just created. Command: [from research]. Files: [list]. Apply fixes; do not modify production source files."
-})
-```
-
-Skipping this step is allowed only if no lint command exists in the project (research.md Commands section is empty). Do not skip merely because the test file looks well-formatted to you — the lint sub-agent's invocation is part of the experiment to measure whether the linter adds value.
+If the project has a lint or format command, call the `code-testing-linter` sub-agent. Skip only if no lint command exists in the project.
 
 ### 8. Report Results
 
@@ -134,5 +99,3 @@ ISSUES:
 3. **Match patterns** — follow existing test style
 4. **Be thorough** — cover edge cases
 5. **Report clearly** — state what was done and any issues
-6. **Test strength is non-negotiable** — see Step 4a. A test that would pass against a stub implementation is a defect.
-7. **Stay inside test directories** — see Step 4b. Modifying env/config files breaks the patch even when tests pass locally.
