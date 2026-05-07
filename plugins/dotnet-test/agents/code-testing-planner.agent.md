@@ -59,6 +59,12 @@ Group files by:
 - **Complexity**: Simpler files first to establish patterns
 - **Logical grouping**: Related files together
 
+**Minimum 2 phases (mandatory)**: produce at least 2 phases per plan, even when the scope is small. Splitting work into phases lets the implementer be invoked multiple times — this is part of the experiment to measure whether per-phase implementer dispatches add value vs a single monolithic call.
+
+- If the scope is one file with one function: Phase 1 = happy path tests, Phase 2 = edge cases + error paths.
+- If the scope is one file with multiple functions: Phase 1 = simpler / pure functions, Phase 2 = functions with side effects or dependencies.
+- If you would otherwise produce only 1 phase, split your test cases by category as above. The only exception is if Phase 2 would have zero non-redundant test cases — in that case, return PHASES=1 with a note.
+
 ### 4. Design Test Cases
 
 For each file in each phase, specify:

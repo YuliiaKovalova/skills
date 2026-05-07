@@ -98,9 +98,19 @@ If tests fail:
 - Never mark a test `[Ignore]`, `[Skip]`, or `[Inconclusive]`
 - Retry the fix-test cycle up to 5 times
 
-### 7. Format Code (Optional)
+### 7. Format Code (mandatory if a lint command exists)
 
-If a lint command is available, call the `code-testing-linter` sub-agent.
+Call the `code-testing-linter` sub-agent unless the project has no lint/format command at all. Pass the lint command discovered by the researcher (`.testagent/research.md` Commands section).
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-linter",
+  name: "linter",
+  prompt: "Run the project's lint/format command on the test files just created. Command: [from research]. Files: [list]. Apply fixes; do not modify production source files."
+})
+```
+
+Skipping this step is allowed only if no lint command exists in the project (research.md Commands section is empty). Do not skip merely because the test file looks well-formatted to you — the lint sub-agent's invocation is part of the experiment to measure whether the linter adds value.
 
 ### 8. Report Results
 

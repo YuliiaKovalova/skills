@@ -46,9 +46,11 @@ This applies to every request, including ones that look like they target a singl
 | 5 | Build the workspace | `task: code-testing-builder` |
 | 6 | Run the tests | `task: code-testing-tester` |
 | 7 | Fix failures (if any) | `task: code-testing-fixer` |
-| 8 | Coverage gap iteration (optional) | re-dispatch researcher/planner/implementer with narrowed focus |
-| 9 | Validate diff and clean up | `task: code-testing-builder` (cleanup prompt) |
-| 10 | Report results | text output, no tool call |
+| 8 | Coverage gap iteration (MANDATORY) | re-dispatch researcher → planner → implementer → builder → tester with narrowed focus |
+| 9 | Quality audit (MANDATORY) | `task: code-testing-fixer` (audit-mode prompt) |
+| 10 | Validate diff and clean up | `task: code-testing-builder` (cleanup prompt) |
+| 11 | Post-cleanup verification | `task: code-testing-tester` (re-run after cleanup) |
+| 12 | Report results | text output, no tool call |
 
 Sub-agents share state via `.testagent/`:
 
@@ -157,21 +159,68 @@ task({
 })
 ```
 
-## Step 8: Coverage gap iteration (optional but recommended)
+## Step 8: Coverage gap iteration (MANDATORY)
 
-Before validating and reporting, ask whether any rubric criteria, named source files, or named functions in the original user task are still uncovered. Sub-agents return summaries; check whether the implementer reported all rubric items as addressed. If anything is still uncovered:
+This step is mandatory on every run, not optional. After the first build/test/fix cycle, dispatch a second iteration of researcher → planner → implementer → builder → tester scoped to anything not yet covered. Even when the first iteration looks complete, the second iteration is required because:
+
+- The first researcher's coverage estimate is approximate; the second pass verifies which source files actually have implementation-specific tests after the first iteration completed.
+- Rubric items often require multiple test files; the gap pass picks up missing scenarios.
+- Forcing the second iteration is part of the experiment to measure whether the researcher/planner sub-agents add value when invoked twice.
 
 ```text
 task({
   agent_type: "dotnet-test:code-testing-researcher",
   name: "researcher-gap",
-  prompt: "Re-research scoped to: [specific uncovered files/functions/rubric items]. Write findings to .testagent/research-2.md."
+  prompt: "Re-research the codebase scoped to coverage gaps. List source files that the first iteration named in scope but did NOT receive tests. For each gap, identify the function name, the rubric item it serves, and the test scenarios needed. Write findings to .testagent/research-2.md. If you find no gaps, write 'NO_GAPS' as the body and return."
 })
 ```
 
-Then re-run planner (writing `.testagent/plan-2.md`) and implementer for the gap phase, followed by builder/tester/fixer cycles. Do this at most once per run; if the second iteration also leaves gaps, list them in the final report rather than looping further.
+If the researcher returns `NO_GAPS`, skip directly to Step 9. Otherwise, dispatch the gap planner → implementer → builder → tester sequence:
 
-## Step 9: Validate diff and clean up
+```text
+task({
+  agent_type: "dotnet-test:code-testing-planner",
+  name: "planner-gap",
+  prompt: "Create a focused plan from .testagent/research-2.md. Write to .testagent/plan-2.md."
+})
+
+task({
+  agent_type: "dotnet-test:code-testing-implementer",
+  name: "implementer-gap",
+  prompt: "Implement the gap phase from .testagent/plan-2.md. Apply the same TEST STRENGTH REQUIREMENTS and FILE-LOCATION RULES from Step 4."
+})
+
+task({ agent_type: "dotnet-test:code-testing-builder", name: "builder-gap", prompt: "Run the full workspace build." })
+task({ agent_type: "dotnet-test:code-testing-tester", name: "tester-gap", prompt: "Run the full test suite." })
+```
+
+Cap at one gap iteration per run. If gaps remain after this iteration, list them in the final report.
+
+## Step 9: Quality audit (MANDATORY)
+
+Even when the tester reports green and Step 8 finds no gaps, dispatch the fixer in **audit mode** to review the generated test files for anti-patterns that compile and pass but provide weak mutation coverage:
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-fixer",
+  name: "auditor",
+  prompt: "AUDIT MODE — no failures to fix. Review every test file the pipeline added or modified (use 'git diff --name-only HEAD' to list them). For each test, check for these anti-patterns and rewrite if found:
+
+  1. Trivial assertions: .toBeTruthy(), .toBeDefined(), .not.toBeNull(), Assert.NotNull(), 'is not None' as the only assertion.
+  2. Type-only assertions: 'isinstance(result, dict)' without checking the values.
+  3. Single-element collection inputs where the function under test handles iteration / aggregation / keying / ordering.
+  4. Tests that would still pass if the function body were replaced with 'return None' / 'return {}' / 'return []' / 'return default'.
+  5. Tests marked [Skip], [Ignore], [Inconclusive], it.skip, xit — these are forbidden; replace with corrected assertions.
+
+  When you find one, replace the assertion with a concrete-value comparison derived from reading the production code. Do not delete the test. After making changes, run the test command to confirm the strengthened tests still pass. If a strengthened test fails, the test is now correct and the production code mismatch is the bug — keep the test, do not weaken it back.
+
+  Return: list of files audited, count of tests strengthened, any remaining anti-patterns you could not fix and why. If no anti-patterns found, return 'NO_CHANGES'."
+})
+```
+
+The audit-mode dispatch is mandatory even when builder and tester report green. Skipping it defeats the purpose of having a fixer in the pipeline — the fixer should provide value beyond just unblocking failures.
+
+## Step 10: Validate diff and clean up
 
 Before reporting success, dispatch the builder sub-agent (it has terminal and edit access) to verify the patch contains only legitimate test changes and to remove pipeline scratch state:
 
@@ -200,7 +249,21 @@ task({
 
 If the validator reports SUSPICIOUS files left in place that you did not authorize, dispatch it again with explicit instructions to revert them.
 
-## Step 10: Report results
+## Step 11: Post-cleanup verification (MANDATORY)
+
+After the validator removes `.testagent/` and reverts SUSPICIOUS files, dispatch the tester one more time to confirm the cleanup did not break the test suite:
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-tester",
+  name: "tester-postcleanup",
+  prompt: "Run the full workspace test suite once more from a fresh build. The pipeline just removed .testagent/ scratch state and may have reverted environment files. Verify all newly-added tests still pass. If any test now fails because it depended on a reverted file, treat that as a test design defect: dispatch the fixer to mock the dependency rather than re-introducing the file. Report final pass/fail counts."
+})
+```
+
+If this final tester run reports failures, dispatch the fixer once with explicit instruction to mock dependencies (not restore reverted files), then report.
+
+## Step 12: Report results
 
 Output a text summary in your final assistant message. No tool call.
 
@@ -236,11 +299,11 @@ All inter-agent state lives in `.testagent/`. Sub-agents read and write these fi
 - `.testagent/plan.md` — planner output
 - `.testagent/status.md` — optional progress tracking
 
-`.testagent/` is removed by the Step 9 validator dispatch. Do not skip Step 9 — leftover `.testagent/` files in the final patch break benchmark manifest checks.
+`.testagent/` is removed by the Step 10 validator dispatch. Do not skip Step 10 — leftover `.testagent/` files in the final patch break benchmark manifest checks.
 
 ## Iterative mode (large scope only)
 
-If the user asks for "achieve N% coverage" or names "the whole solution", repeat Steps 2–6 with narrowed focus until coverage targets are met or remaining files are infeasible. Use unique filenames for repeated documents (`.testagent/research-2.md`, `.testagent/plan-2.md`, etc.).
+If the user asks for "achieve N% coverage" or names "the whole solution", repeat Steps 2–7 with narrowed focus until coverage targets are met or remaining files are infeasible. This is in addition to (not instead of) the mandatory Step 8 gap iteration. Use unique filenames for repeated documents (`.testagent/research-3.md`, `.testagent/plan-3.md`, etc.).
 
 This is the **only** form of deviation from the linear pipeline that is permitted. There is no "direct" or "single-pass-without-research" mode.
 
@@ -248,16 +311,22 @@ This is the **only** form of deviation from the linear pipeline that is permitte
 
 1. **Two verbs only** — `task` and `skill`. You have no other tools. Trying any other tool name will fail.
 2. **First call is always `skill`, second call is always `task → code-testing-researcher`** — every run, every request, no exceptions, regardless of how simple the task looks.
-3. **Sequential phases** — researcher → planner → implementer (per phase) → builder → tester (→ fixer if needed) → report. Do not skip steps.
+3. **Sequential phases** — researcher → planner → implementer (per phase) → builder → tester (→ fixer if needed) → gap iteration → audit → validate → post-cleanup verify → report. Do not skip steps.
 4. **All execution belongs to sub-agents** — they read source, they author tests, they run commands. You only dispatch.
 5. **Polyglot** — load the correct extension via `skill: code-testing-extensions`, and pass the extension name into the implementer prompt.
 6. **No environment-dependent tests** — when dispatching implementer/fixer, instruct them to mock external dependencies; never call external URLs, bind ports, or depend on timing.
 7. **Fix assertions, never skip** — `[Ignore]`/`[Skip]` is forbidden in fixer prompts. Read production code, correct expected values.
 8. **Final validation is mandatory** — builder and tester must run on every pipeline; never skip.
 9. **Preserve existing tests** — instruct implementer to never delete or overwrite existing test files; create new files or append.
-10. **Clean up and diff-validate** — Step 9 (dispatch builder as validator) is mandatory. It removes `.testagent/` and reverts any non-test files the implementer touched (env files, configs, root-level project files). Skipping it produces patches that fail benchmark manifest checks and patches that contain unintended collateral changes.
+10. **Clean up and diff-validate** — Step 10 (dispatch builder as validator) is mandatory. It removes `.testagent/` and reverts any non-test files the implementer touched (env files, configs, root-level project files). Skipping it produces patches that fail benchmark manifest checks and patches that contain unintended collateral changes.
 11. **Test strength is preventative, not post-hoc** — the test-strength rubric (concrete-value assertions, N>=3 collection inputs, full-equality comparisons, no .toBeTruthy()-only tests) belongs in the **implementer** prompt at Step 4, not in the tester prompt at Step 6. By the time the tester runs, weak tests are already written and the fixer cannot strengthen them without re-deriving expected values.
+12. **Step 8 gap iteration is mandatory** — researcher and planner are dispatched a second time on every run. If the gap researcher returns NO_GAPS, you skip the gap planner/implementer/builder/tester but still dispatch researcher to verify gaps don't exist.
+13. **Step 9 audit-mode fixer is mandatory** — even when builder and tester are green, the fixer is dispatched to audit test files for anti-patterns. The fixer is in the pipeline to provide value beyond unblocking failures; skipping audit defeats that purpose.
+14. **Step 11 post-cleanup tester is mandatory** — confirms the validator's reverts did not break tests. Without it, manifest_pass and mutation_pass results are unreliable because they were measured before cleanup.
+15. **Clean git first** — the researcher's first action is `git status`; if there are pre-existing uncommitted changes, it stashes them so the final patch contains only pipeline output.
 
 ## Why this design
 
 Earlier versions of this agent allowed the orchestrator to read files and write code directly. In benchmark runs, the model treated those tools as the easy path and skipped the research/plan steps on tasks that looked simple — producing tests that compiled but missed project conventions and detected fewer mutations. Removing the tools removes the temptation. The pipeline is now the only path to producing tests, and the model has nothing to do but follow it.
+
+The mandatory gap iteration, audit pass, and post-cleanup verification step are intentional cost increases. They exist to measure whether the researcher, planner, and fixer sub-agents add value when invoked at maximum frequency rather than only on the easy path.
