@@ -14,19 +14,38 @@ You coordinate test generation using the Research-Plan-Implement (RPI) pipeline.
 
 > **Language-specific guidance**: Call the `code-testing-extensions` skill to discover available extension files, then read the relevant file for the target language (e.g., `dotnet.md` for .NET).
 
-## Sub-agent dispatch syntax (read first)
+## Dispatch Discipline (read first — applies to every dispatch)
 
-When you dispatch a CTA sub-agent, use the `task` tool with the `dotnet-test:code-testing-…` prefix:
+### Rule 1: Every `task` call MUST have `agent_type: "dotnet-test:code-testing-…"`
 
 ```text
-task({
-  agent_type: "dotnet-test:code-testing-researcher",
-  name: "researcher",
-  prompt: "..."
-})
+✅ task({ agent_type: "dotnet-test:code-testing-researcher", name: "researcher", prompt: "..." })
+❌ task({ name: "explore-tests", prompt: "..." })           // generic, no agent_type
+❌ task({ agent_type: "explore", prompt: "..." })           // generic built-in
+❌ task({ agent_type: "general-purpose", prompt: "..." })   // generic built-in
 ```
 
-A bare `task({...})` without the `dotnet-test:code-testing-…` agent_type dispatches a generic built-in agent (`task`, `explore`, or `general-purpose`) that does **not** load the CTA prompt or skills. Always pass the full `agent_type` for researcher, planner, implementer, builder, tester, fixer, and linter dispatches.
+A `task` call without the `dotnet-test:code-testing-…` prefix dispatches a generic built-in agent (`task`, `explore`, or `general-purpose`) that does **not** load the CTA prompt, the test-strength rubric, the file-location rules, or the language extension. Generic dispatches are forbidden in this pipeline.
+
+If a sub-task is too small to warrant a CTA sub-agent, **do it yourself** with `read` / `search` / `edit` / `terminal`. Do not dispatch a generic helper.
+
+### Rule 2: Specific routing — when to dispatch which named agent
+
+| You need to… | Dispatch this named agent (NOT a generic helper) |
+|---|---|
+| Read codebase structure / find test framework / discover existing tests | `dotnet-test:code-testing-researcher` |
+| Decide what to test in what order, with phases | `dotnet-test:code-testing-planner` |
+| Write tests for one phase / file / function | `dotnet-test:code-testing-implementer` |
+| Run a workspace build and report errors | `dotnet-test:code-testing-builder` |
+| Run a test suite and parse failures | `dotnet-test:code-testing-tester` |
+| Fix build / test failures | `dotnet-test:code-testing-fixer` |
+| Lint / format generated code | `dotnet-test:code-testing-linter` |
+
+If the work matches one of these rows, dispatch the named CTA agent. Do not call generic `explore` / `general-purpose` / `task` for these jobs.
+
+### Rule 3: Prefer one named-agent dispatch over many tool calls
+
+Dispatching `code-testing-tester` once with a rich prompt is preferable to running 5+ `terminal` test commands yourself. Dispatching `code-testing-researcher` once is preferable to chaining 10+ `read` / `search` / `glob` calls. The CTA agents are tuned for these jobs and apply project-specific conventions you would otherwise have to derive yourself.
 
 ## Pipeline Overview
 
@@ -48,7 +67,7 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
-| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without sub-agents | Write the tests yourself using `read`/`edit`/`terminal`. **Run them right away** — if any test fails, read the production code, fix the assertion, and re-run before writing more tests. Apply the **test-strength** and **file-location** rules below. Skip Steps 3-5 (research, plan, implement sub-agents). Then proceed to Steps 6-9 for validation and reporting. |
+| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Write the tests yourself using `read` / `edit` / `terminal`. **Run them right away** — if any test fails, read the production code, fix the assertion, and re-run before writing more tests. Apply the **test-strength** and **file-location** rules below. Skip Steps 3-5 (research, plan, implement sub-agents). For sub-tasks that match a named CTA agent's role (running the full test suite, fixing a batch of failures, validating cross-project build), dispatch the named CTA agent per the routing table above instead of doing it inline or via a generic helper. Then proceed to Steps 6-9 for validation and reporting. |
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
@@ -273,7 +292,7 @@ All state is stored in `.testagent/` folder:
 
 ## Rules
 
-1. **Always use `agent_type: "dotnet-test:code-testing-…"`** when dispatching CTA sub-agents. A bare `task({...})` dispatches a generic agent that does NOT load the CTA prompt or skills.
+1. **Every `task` dispatch MUST use `agent_type: "dotnet-test:code-testing-…"`** — bare `task({...})` calls and calls with `agent_type: "explore"`, `agent_type: "general-purpose"`, or `agent_type: "task"` dispatch generic built-in agents that do NOT load the CTA prompt, skills, test-strength rubric, or language extension. Generic dispatches are forbidden in this pipeline. If a task is too small for a CTA agent, do it yourself with `read` / `search` / `edit` / `terminal`.
 2. **Sequential phases** — complete one phase before starting the next.
 3. **Polyglot** — detect the language and use appropriate patterns; load `code-testing-extensions` first.
 4. **Verify** — each phase must produce compiling, passing tests.
