@@ -33,13 +33,15 @@ If a sub-task is too small to warrant a CTA sub-agent, **do it yourself** with `
 
 | You need to… | Dispatch this named agent (NOT a generic helper) |
 |---|---|
+| Initial scoping research (every run, in Step 1b) | `dotnet-test:code-testing-researcher` |
+| Diagnose an unfamiliar test failure ("why is this assertion failing — research how the function is called elsewhere") | `dotnet-test:code-testing-researcher` (additional dispatch with narrow scope) |
 | Read codebase structure / find test framework / discover existing tests | `dotnet-test:code-testing-researcher` |
 | Decide what to test in what order, with phases | `dotnet-test:code-testing-planner` |
 | Write tests for one phase / file / function | `dotnet-test:code-testing-implementer` |
 | Run a workspace build and report errors | `dotnet-test:code-testing-builder` |
 | Run a test suite and parse failures | `dotnet-test:code-testing-tester` |
-| Fix build / test failures | `dotnet-test:code-testing-fixer` |
-| Lint / format generated code | `dotnet-test:code-testing-linter` |
+| Fix any test failure (mandatory — never fix tests inline yourself, dispatch the fixer) | `dotnet-test:code-testing-fixer` |
+| Lint / format generated code (mandatory after every implementer dispatch finishes) | `dotnet-test:code-testing-linter` |
 
 If the work matches one of these rows, dispatch the named CTA agent. Do not call generic `explore` / `general-purpose` / `task` for these jobs.
 
@@ -61,13 +63,27 @@ Understand what the user wants: scope (project, files, classes), priority areas,
 
 **Read the language-specific extension** for the target codebase by calling the `code-testing-extensions` skill (e.g., read `dotnet.md` for .NET/C# projects). This contains critical build commands, project registration steps, and error-handling guidance that apply to ALL strategies including Direct. You MUST read this file before writing any code.
 
+### Step 1b: Mandatory initial researcher dispatch (every strategy, no exceptions)
+
+Before choosing a strategy, dispatch the researcher once with a focused scope. This applies to Direct, Single pass, and Iterative — including small single-function tasks. The researcher discovers the test framework, naming patterns, and project conventions you cannot infer from the user request alone.
+
+```text
+task({
+  agent_type: "dotnet-test:code-testing-researcher",
+  name: "researcher",
+  prompt: "Initial scoping research for: [USER REQUEST]. Identify: target test framework, existing test layout (file naming + directory), build command for the affected project(s), any existing tests that exercise the same source. Keep the response under 1 page. Write to .testagent/research.md."
+})
+```
+
+You may dispatch the researcher additional times during the run with narrower scopes (e.g., "research how function X is invoked across the repo" before fixing a hard-to-diagnose test failure). Each additional research dispatch is allowed.
+
 ### Step 2: Choose Execution Strategy
 
 Based on the request scope, pick exactly one strategy and follow it:
 
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
-| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Write the tests yourself using `read` / `edit` / `terminal`. **Run them right away** — if any test fails, read the production code, fix the assertion, and re-run before writing more tests. Apply the **test-strength** and **file-location** rules below. Skip Steps 3-5 (research, plan, implement sub-agents). For sub-tasks that match a named CTA agent's role (running the full test suite, fixing a batch of failures, validating cross-project build), dispatch the named CTA agent per the routing table above instead of doing it inline or via a generic helper. Then proceed to Steps 6-9 for validation and reporting. |
+| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Dispatch the named CTA pipeline with **narrow scope** (do NOT write tests inline): (1) dispatch `code-testing-implementer` once with the test-strength + file-location rules embedded, scoped to just the requested function/class — pass the research findings from Step 1b. (2) dispatch `code-testing-tester` to run. (3) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (4) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files. Apply the test-strength and file-location rules below to the implementer dispatch prompt. Skip Step 4 (planner) — Direct mode is one phase by definition. Then proceed to Steps 6-9 for validation and reporting. |
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
