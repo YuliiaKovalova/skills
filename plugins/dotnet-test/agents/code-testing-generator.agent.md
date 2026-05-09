@@ -71,7 +71,23 @@ Before choosing a strategy, dispatch the researcher once with a focused scope. T
 task({
   agent_type: "dotnet-test:code-testing-researcher",
   name: "researcher",
-  prompt: "Initial scoping research for: [USER REQUEST]. Identify: target test framework, existing test layout (file naming + directory), build command for the affected project(s), any existing tests that exercise the same source. Keep the response under 1 page. Write to .testagent/research.md."
+  prompt: "Initial scoping research.
+
+  VERBATIM USER REQUEST: <<<paste the user's request word-for-word here>>>
+
+  Required output (write all of this to .testagent/research.md, keep under 2 pages):
+
+  1. TARGET ENTITIES — for every class / function / method / module the user request mentions or implies needs testing, list it with its EXACT identifier:
+     - file path
+     - line number (if known)
+     - fully-qualified name (e.g., 'ScapyContrib.HTTP2.BitExtendedField.i2m', 'sftpd/internal.go:Transfer.WriteAt', 'src/utils/parse.ts -> parseHeader')
+     - one-line description of what the entity does
+     If the request mentions a name (like 'corrupt_bits'), do NOT substitute a similarly-named entity ('corrupt_bytes') — search the codebase for the exact spelling and report whether it was found.
+     If the request is vague ('test the parsing module'), enumerate every public entity in the named scope with its exact identifier.
+
+  2. TARGET BEHAVIORS — for each target entity, list the distinct behaviors / code paths / error conditions that should be covered. Examples: 'returns 0 for empty input', 'raises ValueError on negative input', 'handles closed file handle by returning error'. List each behavior as a separate bullet so the planner can map them to test cases.
+
+  3. TEST INFRASTRUCTURE — target test framework, existing test layout (file naming + directory), build command for affected project(s), any existing tests that already exercise the target entities."
 })
 ```
 
@@ -135,7 +151,18 @@ Output: `.testagent/research.md`
 task({
   agent_type: "dotnet-test:code-testing-planner",
   name: "planner",
-  prompt: "Create a phased test implementation plan based on .testagent/research.md. Each phase should list specific source files and test cases. Write the plan to .testagent/plan.md."
+  prompt: "Create a phased test implementation plan based on .testagent/research.md.
+
+  VERBATIM USER REQUEST: <<<paste the user's request word-for-word here>>>
+
+  For each phase, list:
+  - The EXACT target entities to test (use the fully-qualified identifiers from research.md, including file path and class/method names — do not paraphrase).
+  - For each target entity, the specific behaviors / code paths / error conditions from research.md that this phase covers (one test case per behavior).
+  - The exact test file path that will hold the new tests.
+
+  Do not group unrelated entities into one phase. If the research identified 3 distinct classes that need testing, produce 3 phases (one per class) so each implementer dispatch has a focused scope.
+
+  Write the plan to .testagent/plan.md."
 })
 ```
 
@@ -149,7 +176,23 @@ Execute each phase by dispatching the implementer once, sequentially. **Pass the
 task({
   agent_type: "dotnet-test:code-testing-implementer",
   name: "implementer",
-  prompt: "Implement Phase N from .testagent/plan.md: [phase description from planner return]. Apply the language-specific guidance from the [dotnet.md|cpp.md|...] extension.
+  prompt: "Implement Phase N from .testagent/plan.md: [phase description from planner return — include the EXACT target entity identifiers and behaviors listed in the phase, do not paraphrase]. Apply the language-specific guidance from the [dotnet.md|cpp.md|...] extension.
+
+  VERBATIM USER REQUEST: <<<paste the user's request word-for-word here>>>
+
+  TARGET ENTITIES (mandatory — copy from .testagent/plan.md):
+  - <fully-qualified-name-1> at <file>:<line> — covers behaviors: <bullet list from plan>
+  - <fully-qualified-name-2> at <file>:<line> — covers behaviors: <bullet list from plan>
+
+  Write tests ONLY for the listed target entities. If the planner says to test 'BitExtendedField.i2m', do not substitute a similarly-named entity ('UVarIntField.i2m') even if it looks related — go back to the plan and verify, or ask for clarification.
+
+  TEST TRACEABILITY (mandatory):
+  - Each test you write must start with a single-line comment header naming the entity under test, in the form:
+    Python:     # Covers: <fully-qualified-name> at <file>:<line>
+    .NET/C#:    // Covers: <fully-qualified-name> at <file>:<line>
+    Go:         // Covers: <fully-qualified-name> at <file>:<line>
+    TypeScript: // Covers: <fully-qualified-name> at <file>:<line>
+  - This comment must reference an entity from the TARGET ENTITIES list above. If you cannot map the test to a target entity, do not write that test — it is out of scope for this phase.
 
   TEST STRENGTH REQUIREMENTS (mandatory):
   - Each test must assert on CONCRETE expected values, not type checks or non-null checks. A test that would still pass if the function under test returned a default value is too weak — rewrite it.
