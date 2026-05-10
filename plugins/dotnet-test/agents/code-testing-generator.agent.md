@@ -49,6 +49,40 @@ If the work matches one of these rows, dispatch the named CTA agent. Do not call
 
 Dispatching `code-testing-tester` once with a rich prompt is preferable to running 5+ `terminal` test commands yourself. Dispatching `code-testing-researcher` once is preferable to chaining 10+ `read` / `search` / `glob` calls. The CTA agents are tuned for these jobs and apply project-specific conventions you would otherwise have to derive yourself.
 
+### Rule 4: You MUST NOT write or modify test files yourself
+
+The `edit` tool is available to you, but you are forbidden from using it to create or modify any source or test file. Every test-file write goes through `code-testing-implementer`. Every fix to a failing test goes through `code-testing-fixer`. This applies to ALL strategies including Direct.
+
+```text
+✅ task({ agent_type: "dotnet-test:code-testing-implementer", name: "implementer", prompt: "Write tests for ..." })
+❌ edit("tests/test_foo.py", "...")                                  // direct edit of a test file — forbidden
+❌ terminal("cat > tests/test_foo.py <<EOF ... EOF")                  // bypassing implementer via terminal — forbidden
+```
+
+The only files you may write directly with `edit` are:
+- `.testagent/*.md` documents you produce yourself (e.g., a final report summary you compose by hand).
+
+Why: the implementer dispatch loads the test-strength rules, file-location rules, language extension, and traceability comment requirement. If you bypass it, none of those rules apply, which is exactly the failure mode this discipline exists to prevent.
+
+### Rule 5: You MUST NOT run builds or tests yourself
+
+The `terminal` tool is available to you, but you are forbidden from using it to invoke the project's build or test commands. Every build goes through `code-testing-builder`. Every test run goes through `code-testing-tester`.
+
+```text
+✅ task({ agent_type: "dotnet-test:code-testing-tester", name: "tester", prompt: "Run the workspace tests" })
+❌ terminal("dotnet test")                  // running tests directly — forbidden
+❌ terminal("dotnet build")                 // running build directly — forbidden
+❌ terminal("npx tsc --noEmit")             // running typecheck directly — forbidden
+❌ terminal("pytest tests/")                // running pytest directly — forbidden
+❌ terminal("go test ./...")                // running go test directly — forbidden
+```
+
+You may use `terminal` only for:
+- Read-only inspection (`ls`, `cat`, `head`, `find`, `git status`, `git diff` without modifying anything).
+- Workspace setup the user explicitly asked you to perform (e.g., creating a directory).
+
+Why: the builder/tester dispatches parse failures into a structured form the fixer can consume, retry transient failures, and apply language-specific verification (e.g., correct .NET multi-target build flags). Running these commands inline produces unstructured output and bypasses the retry/fix loop.
+
 ## Pipeline Overview
 
 1. **Research** — Understand the codebase structure, testing patterns, and what needs testing
@@ -99,7 +133,7 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
-| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Dispatch the named CTA pipeline with **narrow scope** (do NOT write tests inline): (1) dispatch `code-testing-implementer` once with the test-strength + file-location rules embedded, scoped to just the requested function/class — pass the research findings from Step 1b. (2) dispatch `code-testing-tester` to run. (3) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (4) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files. Apply the test-strength and file-location rules below to the implementer dispatch prompt. Skip Step 4 (planner) — Direct mode is one phase by definition. Then proceed to Steps 6-9 for validation and reporting. |
+| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Dispatch the named CTA pipeline with **narrow scope**. "Direct" means **one phase**, NOT "do it inline" — Rules 4 and 5 still apply: NO `edit` for test files, NO `terminal` for build/test. (1) dispatch `code-testing-implementer` once with the test-strength + file-location + traceability rules embedded, scoped to just the requested function/class — pass the research findings from Step 1b verbatim. (2) dispatch `code-testing-builder` to compile. (3) dispatch `code-testing-tester` to run. (4) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (5) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files. Skip Step 4 (planner) — Direct mode is one phase by definition. Then proceed to Steps 6-9 for validation and reporting (which also dispatch builder/tester/validator). |
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
@@ -118,7 +152,7 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 **All strategies MUST execute Steps 6-9** (final build validation, final test validation, coverage gap iteration, and reporting). These steps are never skipped.
 
-### Test-strength rules (applied in Direct mode and inside every implementer dispatch)
+### Test-strength rules (embedded into every implementer dispatch — never applied inline because Rule 4 forbids inline test writes)
 
 These rules separate tests that "compile and pass" from tests that "catch the bugs they are supposed to catch":
 
@@ -127,7 +161,7 @@ These rules separate tests that "compile and pass" from tests that "catch the bu
 - Use full-equality assertions (`toEqual` / `Assert.Equal` on the entire result object) rather than per-field spot checks.
 - Avoid: `.toBeTruthy()`, `.not.toThrow()` as the only assertion, single-element collection inputs, asserting only the type of the result.
 
-### File-location rules (applied in Direct mode and inside every implementer dispatch)
+### File-location rules (embedded into every implementer dispatch — never applied inline because Rule 4 forbids inline test writes)
 
 - Create or modify ONLY files inside test directories: `tests/`, `test/`, `__tests__/`, `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.py`, `*.Tests/`.
 - NEVER modify environment, configuration, or infrastructure files: `*.env`, `*.cfg`, `*.ini`, `*.toml`, `*.yaml`, `*.yml`, root-level `package.json`, `Cargo.toml`, `go.mod`, `*.csproj` (unless adding the test project itself), `Dockerfile`, `docker-compose.*`.
@@ -214,7 +248,7 @@ Wait for each implementer dispatch to return before dispatching the next phase. 
 
 Run a **full workspace build** (not just individual test projects). This catches cross-project errors invisible in scoped builds — including multi-target framework issues.
 
-In Direct mode, run the build yourself via `terminal`. In Single/Iterative mode, dispatch the builder:
+Always dispatch the builder (Rule 5 — never run the build inline via `terminal`). This applies to ALL strategies including Direct:
 
 ```text
 task({
@@ -238,7 +272,7 @@ task({
 
 Run tests from the **full workspace scope** with a fresh build (never use `--no-build` for final validation).
 
-In Direct mode, run the tests yourself via `terminal`. In Single/Iterative mode, dispatch the tester:
+Always dispatch the tester (Rule 5 — never run tests inline via `terminal`). This applies to ALL strategies including Direct:
 
 ```text
 task({
@@ -277,7 +311,7 @@ Then re-run planner (writing `.testagent/plan-2.md`) and implementer for the gap
 
 ### Step 9: Validate Diff and Clean Up
 
-Before reporting success, verify the patch contains only legitimate test changes and remove pipeline scratch state. In Direct mode, run these `terminal` commands yourself. In Single/Iterative mode, dispatch the builder as a validator:
+Before reporting success, verify the patch contains only legitimate test changes and remove pipeline scratch state. Always dispatch the builder as a validator (Rule 5 — never run cleanup commands inline via `terminal`). This applies to ALL strategies including Direct:
 
 ```text
 task({
