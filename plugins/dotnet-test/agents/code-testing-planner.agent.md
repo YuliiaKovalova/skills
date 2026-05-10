@@ -59,7 +59,7 @@ Group files by:
 - **Complexity**: Simpler files first to establish patterns
 - **Logical grouping**: Related files together
 
-Produce **at least 2 phases** per plan. If the natural scope yields only 1 phase, split test cases into Phase 1 (happy path) + Phase 2 (edge cases and error paths). Only return a single phase if Phase 2 would have zero non-redundant test cases.
+Produce **at least 2 phases** per plan, EXCEPT when the orchestrator dispatch prompt includes the hint `[scope=single-phase]` (Direct mode) — in that case produce exactly one phase. Outside of Direct mode, if the natural scope yields only 1 phase, split test cases into Phase 1 (happy path) + Phase 2 (edge cases and error paths). Only return a single phase if Phase 2 would have zero non-redundant test cases.
 
 ### 4. Design Test Cases
 
@@ -71,6 +71,24 @@ For each file in each phase, specify:
 - Key test scenarios (happy path, edge cases, errors)
 
 **Important**: When adding new tests, they MUST go into the existing test project that already tests the target code. Do not create a separate test project unnecessarily. If no existing test project covers the target, create a new one.
+
+### 4b. Build a per-phase CHECKLIST (mandatory)
+
+For every phase, after the file/method breakdown, produce a CHECKLIST section that the implementer will use as a verifiable contract:
+
+```markdown
+## CHECKLIST (Phase N)
+- [ ] T1 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
+- [ ] T2 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
+- [ ] T3 — ...
+```
+
+Rules for the CHECKLIST:
+
+- **One item per TARGET BEHAVIOR in research.md.** Do not merge two behaviors into one item. Do not drop behaviors. If research.md lists 7 behaviors for the entity, the CHECKLIST has 7 items. The implementer treats this as a contract — every Tn becomes one test in the generated file.
+- **Use research.md's identifiers verbatim.** `<FQN-from-research>` must match a target entity from research.md exactly (same file path, same fully-qualified name). Do not invent entities the researcher did not name; do not paraphrase identifiers.
+- **Concrete assertion, not vague intent.** `<assertion>` states a specific expected outcome — a value (`returns 0`), a state change (`appends to history buffer`), a raised exception type (`raises ValueError`), or an explicit no-op (`leaves cursor.x unchanged`). "Verifies behavior" or "tests the function" is too vague — the implementer cannot derive a passing/failing assertion from it.
+- **One sentence per item.** If the assertion does not fit in one sentence, the behavior is too coarse — split it into two CHECKLIST items.
 
 ### 5. Generate Plan Document
 
@@ -137,6 +155,7 @@ What this phase accomplishes and why it's first.
 3. **Be incremental** — each phase should be independently valuable
 4. **Include patterns** — show code templates for the language
 5. **Match existing style** — follow patterns from existing tests if any
+6. **Every phase has a CHECKLIST** — one item per TARGET BEHAVIOR in research.md, never dropped, never merged. The CHECKLIST is the implementer's contract; without it, behaviors get silently omitted at implementation time.
 
 ## Output
 

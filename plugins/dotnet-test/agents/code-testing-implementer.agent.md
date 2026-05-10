@@ -51,6 +51,19 @@ For each test file in your phase:
 - Include tests for: happy path, edge cases (empty, null, boundary), error conditions
 - Mock all external dependencies — never call external URLs, bind ports, or depend on timing
 
+### 4b. Verify CHECKLIST coverage before declaring the phase complete (mandatory)
+
+If the dispatch prompt includes a `PHASE CHECKLIST` (which it always will when called from `code-testing-generator`), you have a contractual obligation to cover every Tn:
+
+1. After writing the test file, re-read it and walk the CHECKLIST item by item.
+2. For each Tn (T1, T2, T3, …):
+   - Find a test in the file whose `// Covers:` (or `# Covers:`) header references the same FQN AND whose body asserts the listed concrete outcome.
+   - If you find a match, mark it covered.
+   - If you do not, write the missing test now. Do not skip silently.
+3. If a Tn is genuinely untestable in the current scope (e.g., the function is private, inlined, or requires an unavailable fixture), document the reason in the final report's CHECKLIST COVERAGE section. Do not omit it without justification.
+
+**Do not return `STATUS: SUCCESS` while any Tn is unchecked and undocumented.** A 9-of-10-checklist-items result is `STATUS: PARTIAL`, not `SUCCESS`.
+
 ### 5. Verify with Build
 
 Call the `code-testing-builder` sub-agent to compile. Build only the specific test project, not the full solution.
@@ -86,9 +99,16 @@ TESTS_CREATED: [count]
 TESTS_PASSING: [count]
 FILES:
 - path/to/TestFile.ext (N tests)
+CHECKLIST COVERAGE:
+- T1 — <test_name_in_file> ✓
+- T2 — <test_name_in_file> ✓
+- T3 — SKIPPED — <reason: e.g., private/inlined/unavailable fixture>
+- ...
 ISSUES:
 - [Any unresolved issues]
 ```
+
+`STATUS: SUCCESS` requires every Tn to be either ✓ (covered) or SKIPPED with a documented reason. If any Tn is silently missing, `STATUS` is `PARTIAL` at best.
 
 > **Concrete example**: For a complete generated test file and build-error fix cycle walkthrough, call the `code-testing-extensions` skill and read `dotnet-examples.md` ("Sample Generated Test File" and "Sample Fix Cycle" sections).
 
@@ -99,3 +119,4 @@ ISSUES:
 3. **Match patterns** — follow existing test style
 4. **Be thorough** — cover edge cases
 5. **Report clearly** — state what was done and any issues
+6. **Honor the CHECKLIST** — when the dispatch prompt includes a PHASE CHECKLIST, every Tn must end up either as a corresponding test in the file (`✓`) or as a documented SKIPPED entry with a concrete reason. Silently dropped checklist items are the single most common failure mode and are explicitly forbidden.

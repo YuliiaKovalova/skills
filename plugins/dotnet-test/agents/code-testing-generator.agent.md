@@ -36,7 +36,7 @@ If a sub-task is too small to warrant a CTA sub-agent, **do it yourself** with `
 | Initial scoping research (every run, in Step 1b) | `dotnet-test:code-testing-researcher` |
 | Diagnose an unfamiliar test failure ("why is this assertion failing — research how the function is called elsewhere") | `dotnet-test:code-testing-researcher` (additional dispatch with narrow scope) |
 | Read codebase structure / find test framework / discover existing tests | `dotnet-test:code-testing-researcher` |
-| Decide what to test in what order, with phases | `dotnet-test:code-testing-planner` |
+| Translate research into a per-test-case CHECKLIST (every run, in Step 4) | `dotnet-test:code-testing-planner` |
 | Write tests for one phase / file / function | `dotnet-test:code-testing-implementer` |
 | Run a workspace build and report errors | `dotnet-test:code-testing-builder` |
 | Run a test suite and parse failures | `dotnet-test:code-testing-tester` |
@@ -82,6 +82,19 @@ You may use `terminal` only for:
 - Workspace setup the user explicitly asked you to perform (e.g., creating a directory).
 
 Why: the builder/tester dispatches parse failures into a structured form the fixer can consume, retry transient failures, and apply language-specific verification (e.g., correct .NET multi-target build flags). Running these commands inline produces unstructured output and bypasses the retry/fix loop.
+
+### Rule 6: Every run MUST dispatch the planner between researcher and implementer
+
+There are no exceptions — Direct, Single pass, and Iterative all dispatch the planner. The planner's job is to translate the research findings into a per-test-case CHECKLIST that the implementer can mechanically verify against. Without this checklist, behaviors enumerated in research are silently dropped at implementation time because the implementer treats research as advisory prose rather than as a contract.
+
+```text
+✅ researcher → planner → implementer → builder → tester → ...   (mandatory order)
+❌ researcher → implementer (skip planner)                        // forbidden, even for "small" scope
+```
+
+For a single-function request, the planner produces a one-phase plan with one CHECKLIST item per target behavior. The planner is never skipped on the grounds that "the scope is too small" — small scopes are exactly where dropped behaviors are most visible.
+
+Why: research.md lists target behaviors as bulletable prose. The implementer has no machine-checkable obligation to cover each one. A planner-produced CHECKLIST converts the bullets into a discrete list with names and assertions; the implementer is then required (Rule 6 in `code-testing-implementer`) to map every checklist item to a `// Covers:` comment in the generated test file before returning. This closes the most common failure mode (research correctly identifies a behavior, implementer omits the assertion).
 
 ## Pipeline Overview
 
@@ -133,7 +146,7 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
-| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Dispatch the named CTA pipeline with **narrow scope**. "Direct" means **one phase**, NOT "do it inline" — Rules 4 and 5 still apply: NO `edit` for test files, NO `terminal` for build/test. (1) dispatch `code-testing-implementer` once with the test-strength + file-location + traceability rules embedded, scoped to just the requested function/class — pass the research findings from Step 1b verbatim. (2) dispatch `code-testing-builder` to compile. (3) dispatch `code-testing-tester` to run. (4) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (5) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files. Skip Step 4 (planner) — Direct mode is one phase by definition. Then proceed to Steps 6-9 for validation and reporting (which also dispatch builder/tester/validator). |
+| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | Dispatch the named CTA pipeline with **narrow scope**. "Direct" means **one phase**, NOT "do it inline" — Rules 4, 5, and 6 still apply: NO `edit` for test files, NO `terminal` for build/test, NO skipping the planner. (1) dispatch `code-testing-planner` once (Step 4) with `[scope=single-phase]` hint to produce a one-phase plan whose CHECKLIST has one item per TARGET BEHAVIOR from `.testagent/research.md`. (2) dispatch `code-testing-implementer` once with the test-strength + test-design + file-location + traceability rules embedded AND the planner's CHECKLIST pasted verbatim, scoped to just the requested function/class. (3) dispatch `code-testing-builder` to compile. (4) dispatch `code-testing-tester` to run. (5) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (6) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files. Then proceed to Steps 6-9 for validation and reporting (which also dispatch builder/tester/validator). |
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
@@ -191,6 +204,8 @@ Output: `.testagent/research.md`
 
 ### Step 4: Planning Phase
 
+**Mandatory for every strategy** (Rule 6). Even for Direct (single-function) scope, the planner runs and produces a one-phase plan; the planner is what converts research's TARGET BEHAVIORS bullets into a discrete CHECKLIST that the implementer can mechanically verify.
+
 ```text
 task({
   agent_type: "dotnet-test:code-testing-planner",
@@ -199,22 +214,36 @@ task({
 
   VERBATIM USER REQUEST: <<<paste the user's request word-for-word here>>>
 
+  STRATEGY HINT: <<<one of: [scope=single-phase] for Direct mode | [scope=multi-phase] for Single pass / Iterative>>>
+
   For each phase, list:
   - The EXACT target entities to test (use the fully-qualified identifiers from research.md, including file path and class/method names — do not paraphrase).
-  - For each target entity, the specific behaviors / code paths / error conditions from research.md that this phase covers (one test case per behavior).
   - The exact test file path that will hold the new tests.
+
+  THEN, for each phase, produce a CHECKLIST section in this exact format:
+
+  ## CHECKLIST (Phase N)
+  - [ ] T1 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
+  - [ ] T2 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
+  - ...
+
+  Rules for the CHECKLIST:
+  - Produce ONE checklist item per TARGET BEHAVIOR listed in research.md. Do not merge two behaviors into one item; do not drop behaviors. If research.md lists 7 behaviors for the entity, the checklist has 7 items.
+  - Each <FQN-from-research> must match a target entity from research.md verbatim (same file path, same fully-qualified name). Do not invent entities the researcher did not name.
+  - Each <assertion> states a concrete expected outcome (a value, a state change, a raised exception type), not a vague intent ('verifies behavior'). The implementer will use this assertion as the pass criterion.
+  - For [scope=single-phase] (Direct mode), produce exactly one phase. Do not split into Phase 1 / Phase 2 — Direct mode is one phase by definition.
 
   Do not group unrelated entities into one phase. If the research identified 3 distinct classes that need testing, produce 3 phases (one per class) so each implementer dispatch has a focused scope.
 
-  Write the plan to .testagent/plan.md."
+  Write the plan (with the per-phase CHECKLIST sections) to .testagent/plan.md."
 })
 ```
 
-Output: `.testagent/plan.md`
+Output: `.testagent/plan.md` containing one or more phases, each with a CHECKLIST of one item per TARGET BEHAVIOR from research.md.
 
 ### Step 5: Implementation Phase
 
-Execute each phase by dispatching the implementer once, sequentially. **Pass the test-strength and file-location rules into the prompt** — these are what separate weak tests from real ones:
+Execute each phase by dispatching the implementer once, sequentially. **Pass the test-strength, test-design, file-location, and traceability rules into the prompt — and paste the planner's CHECKLIST verbatim**. The CHECKLIST is what makes "cover every behavior" enforceable rather than advisory:
 
 ```text
 task({
@@ -228,7 +257,17 @@ task({
   - <fully-qualified-name-1> at <file>:<line> — covers behaviors: <bullet list from plan>
   - <fully-qualified-name-2> at <file>:<line> — covers behaviors: <bullet list from plan>
 
+  PHASE CHECKLIST (mandatory — copy verbatim from .testagent/plan.md ## CHECKLIST (Phase N)):
+  - [ ] T1 — <test_name> — covers <FQN> — assertion: <concrete outcome>
+  - [ ] T2 — <test_name> — covers <FQN> — assertion: <concrete outcome>
+  - ...
+
   Write tests ONLY for the listed target entities. If the planner says to test 'BitExtendedField.i2m', do not substitute a similarly-named entity ('UVarIntField.i2m') even if it looks related — go back to the plan and verify, or ask for clarification.
+
+  CHECKLIST COMPLETION (mandatory — Rule 6 in your own agent prompt requires this):
+  - For each Tn in the PHASE CHECKLIST above, write one test whose `// Covers:` (or `# Covers:`) header references the same FQN AND whose body asserts the listed concrete outcome. The test name should match or closely reflect <test_name>.
+  - Before returning your final report, perform a self-check: re-read the test file you wrote and confirm there is exactly one test for each Tn. If any Tn has no corresponding test, write it before returning. Do NOT return PHASE: SUCCESS while any Tn is unchecked.
+  - In your final report, include a 'CHECKLIST COVERAGE' section listing each Tn and the test name that covers it. If any Tn is intentionally skipped, state why (e.g., 'T5 unreachable — function is inlined / private to module / requires unavailable fixture') — do not silently drop items.
 
   TEST TRACEABILITY (mandatory):
   - Each test you write must start with a single-line comment header naming the entity under test, in the form:
@@ -247,7 +286,7 @@ task({
   TEST DESIGN RULES (mandatory):
   - **Test the named entity DIRECTLY.** If the target is `Foo.bar()`, the test body must contain a direct call to `Foo.bar(...)`. Tests that reach `bar()` only as a side effect of calling some wrapper (`Foo.processAll()` which internally invokes `bar()`) do NOT isolate `bar()`'s behavior — branching in the wrapper can mask bugs in `bar()`. If the only reachable call path is via a wrapper, document that explicitly in the test name and add a second test that asserts the post-condition specifically attributable to `bar()`.
   - **One factor at a time (OFAT).** When testing the effect of input X on the target, hold all other inputs to documented defaults / canonical values. If the behavior under test is 'with bottom margin only', do not also set the top margin in the same test — observed behavior could not be attributed to the bottom margin. Each test should vary exactly one knob from a known baseline.
-  - **Cover every behavior in the phase.** Before finishing this phase, mentally enumerate the TARGET BEHAVIORS list above. For each behavior, verify there is at least one test whose `Covers:` comment references the target entity AND whose body exercises that specific behavior. If a behavior has no test, write one or document in the phase summary why it is untestable in the current scope.
+  - **Cover every behavior in the phase.** Before finishing this phase, walk the PHASE CHECKLIST item by item (this is the same as the CHECKLIST COMPLETION step above — do both). For each Tn, verify there is at least one test whose `Covers:` comment references the target entity AND whose body exercises the listed concrete outcome. If a behavior has no test, write one or document in the phase summary why it is untestable in the current scope.
   - **Mutation self-check.** After writing each test, ask: 'what one-line change to the function under test would cause this test to fail?' If the honest answer is 'nothing — the test would pass even if the function returned None / 0 / "" / a default-constructed object', the assertion is too weak; rewrite it to lock down a concrete expected value.
   - **Never mock the function under test.** Mocks/patches/stubs are for the test subject's *dependencies*. If the target is `Foo.bar()`, you may mock the database, network, or filesystem that `bar()` calls — but you must NEVER replace `Foo.bar()` itself with a mock; there would be nothing left to verify.
 
