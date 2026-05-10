@@ -102,6 +102,16 @@ Rules for the CHECKLIST:
   - When the behavior is genuinely a single scenario with no enumeration, write `Variants: single`.
 - **Expected is mandatory and concrete.** State the specific value/state per variant — a value (`returns 'AA' at x=2`), a state change (`appends to history buffer`), a raised exception type (`raises ValueError("invalid")`), or an explicit no-op (`leaves cursor.x unchanged`). For each expected outcome, briefly cite where in the source the value is produced (e.g., `derived from screen.c:447 — branch returns prefix repeated count times`). The implementer uses these as the assertion's expected values without re-deriving them — vague expecteds become wrong assertions.
 - **Compactness.** Each Tn should fit on 4 lines (header + Source + Variants + Expected). If Expected needs more than one short paragraph, the behavior is too coarse — split it into two CHECKLIST items.
+- **Test name discipline.** The `<test_name>` you put on each Tn header is the literal symbol the implementer will write into the test file. It must follow the language's idiomatic convention and pair tightly with the function under test, because most discovery, reporting, and analysis tooling matches tests to source by name. Concretely:
+  - **Python**: `test_<function_under_test>_<short_scenario>` (snake_case). Example: `test_get_alias_recipient_name_with_display_name`. NOT `test_get_alias_recipient_name_alias_name_takes_precedence_over_custom_domain` (verbose tail breaks the function-name pairing — the tail looks like a different function name).
+  - **Go**: `Test<FunctionUnderTest><ShortScenario>` or `Test<FunctionUnderTest>_<ShortScenario>` (PascalCase). Example: `TestHandleRPM` or `TestExtractRPM_Nested`. NOT `TestHandleFileRPM` when the function actually under test is `HandleRPM` — name after the deepest specific helper, not the public entry point.
+  - **C#/Java**: `<MethodUnderTest>_<Scenario>_<ExpectedResult>` (PascalCase). Example: `Parse_EmptyInput_Throws`.
+  - **JS/TS (Jest/Mocha)**: descriptive string in `it(...)` paired with `describe('<functionUnderTest>', ...)`.
+  - **Universal rules** (apply to every language):
+    - The scenario tail MUST be ≤ 4 words. Long descriptive sentences belong in the `Source:`/`Expected:` fields, not the test name.
+    - NEVER prefix names with `Scenario1:`, `Scenario 1 -`, `Test1:`, `Variant_A_`, etc. Test runners, coverage tools, and IDE filtering all parse names as code symbols and cannot match those prefixes.
+    - NEVER copy the verbatim text from `Variants:` as the test name. The Variants field is documentation; the name is a code symbol.
+    - When in doubt, name the test after the **deepest specific function being exercised** (the helper, the branch, the leaf), not after the public method that calls it. This keeps function-name → test-name pairing tight, which is what test discovery, coverage tooling, and mutation analysis depend on.
 
 ### 5. Generate Plan Document
 
