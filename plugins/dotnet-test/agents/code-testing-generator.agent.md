@@ -161,6 +161,16 @@ These rules separate tests that "compile and pass" from tests that "catch the bu
 - Use full-equality assertions (`toEqual` / `Assert.Equal` on the entire result object) rather than per-field spot checks.
 - Avoid: `.toBeTruthy()`, `.not.toThrow()` as the only assertion, single-element collection inputs, asserting only the type of the result.
 
+### Test-design rules (embedded into every implementer dispatch — never applied inline because Rule 4 forbids inline test writes)
+
+These rules separate tests that "exercise some code" from tests that "isolate the named entity":
+
+- **Test the named entity directly.** If the target is `Foo.bar()`, the test body must call `Foo.bar(...)` directly. Tests that reach `bar()` only as a side effect of calling some wrapper (`Foo.processAll()` which internally invokes `bar()`) do not isolate `bar()` — branching in the wrapper can mask bugs in `bar()`.
+- **One factor at a time (OFAT).** When testing the effect of input X, hold all other inputs to documented defaults. If the behavior under test is "with bottom margin only", do not also set the top margin in the same test — observed behavior could not be attributed to the bottom margin.
+- **Cover every behavior in the phase.** Before finishing a phase, enumerate the listed target behaviors and verify each has at least one test referencing both the target entity and the specific behavior. If a behavior has no test, write one or document why it is untestable in the current scope.
+- **Mutation self-check.** After writing each test, ask: "what one-line change to the function under test would cause this test to fail?" If the answer is "nothing", the assertion is too weak — rewrite to a concrete expected value.
+- **Never mock the function under test.** Mocks/patches/stubs are for the test subject's *dependencies*, not the subject itself.
+
 ### File-location rules (embedded into every implementer dispatch — never applied inline because Rule 4 forbids inline test writes)
 
 - Create or modify ONLY files inside test directories: `tests/`, `test/`, `__tests__/`, `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.py`, `*.Tests/`.
@@ -233,6 +243,13 @@ task({
   - For functions over collections, use inputs with N >= 3 elements (not 1) so iteration, ordering, and key-collision bugs are exposed.
   - Use full-equality assertions (toEqual / Assert.Equal on the entire result object) rather than per-field spot checks.
   - Avoid: .toBeTruthy(), .not.toThrow() as the only assertion, single-element collection inputs, asserting only the type of the result.
+
+  TEST DESIGN RULES (mandatory):
+  - **Test the named entity DIRECTLY.** If the target is `Foo.bar()`, the test body must contain a direct call to `Foo.bar(...)`. Tests that reach `bar()` only as a side effect of calling some wrapper (`Foo.processAll()` which internally invokes `bar()`) do NOT isolate `bar()`'s behavior — branching in the wrapper can mask bugs in `bar()`. If the only reachable call path is via a wrapper, document that explicitly in the test name and add a second test that asserts the post-condition specifically attributable to `bar()`.
+  - **One factor at a time (OFAT).** When testing the effect of input X on the target, hold all other inputs to documented defaults / canonical values. If the behavior under test is 'with bottom margin only', do not also set the top margin in the same test — observed behavior could not be attributed to the bottom margin. Each test should vary exactly one knob from a known baseline.
+  - **Cover every behavior in the phase.** Before finishing this phase, mentally enumerate the TARGET BEHAVIORS list above. For each behavior, verify there is at least one test whose `Covers:` comment references the target entity AND whose body exercises that specific behavior. If a behavior has no test, write one or document in the phase summary why it is untestable in the current scope.
+  - **Mutation self-check.** After writing each test, ask: 'what one-line change to the function under test would cause this test to fail?' If the honest answer is 'nothing — the test would pass even if the function returned None / 0 / "" / a default-constructed object', the assertion is too weak; rewrite it to lock down a concrete expected value.
+  - **Never mock the function under test.** Mocks/patches/stubs are for the test subject's *dependencies*. If the target is `Foo.bar()`, you may mock the database, network, or filesystem that `bar()` calls — but you must NEVER replace `Foo.bar()` itself with a mock; there would be nothing left to verify.
 
   FILE-LOCATION RULES (mandatory):
   - Create or modify ONLY files inside test directories: tests/, test/, __tests__/, *.test.*, *.spec.*, *_test.go, *_test.py, *.Tests/.
