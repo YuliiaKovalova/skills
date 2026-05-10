@@ -53,22 +53,33 @@ For each test file in your phase:
 
 ### 4b. Verify CHECKLIST coverage before declaring the phase complete (mandatory)
 
-If the dispatch prompt includes a `PHASE CHECKLIST` (which it always will when called from `code-testing-generator`), you have a contractual obligation to cover every Tn:
+If the dispatch prompt includes a `PHASE CHECKLIST` (which it always will when called from `code-testing-generator`), you have a contractual obligation to cover every Tn AND every variant within each Tn. The CHECKLIST format is:
 
-1. After writing the test file, re-read it and walk the CHECKLIST item by item.
-2. For each Tn (T1, T2, T3, …):
-   - Find a test in the file whose `// Covers:` (or `# Covers:`) header references the same FQN AND whose body asserts the listed concrete outcome.
-   - If you find a match, mark it covered.
-   - If you do not, write the missing test now. Do not skip silently.
-3. If a Tn is genuinely untestable in the current scope (e.g., the function is private, inlined, or requires an unavailable fixture), document the reason in the final report's CHECKLIST COVERAGE section. Do not omit it without justification.
+```
+- [ ] Tn — <test_name> — covers <FQN>
+      Source: <file>:<line-range>
+      Variants: <list or "single">
+      Expected: <concrete value/state per variant, anchored to source line>
+```
 
-**Do not return `STATUS: SUCCESS` while any Tn is unchecked and undocumented.** A 9-of-10-checklist-items result is `STATUS: PARTIAL`, not `SUCCESS`.
+For each Tn:
+
+1. **Read the cited Source range first.** Open the file at the listed line range with `view` and confirm the implementation produces the listed Expected values. Do not skip this — paraphrasing research without reading source is the dominant cause of wrong assertions. If the Expected disagrees with what the source actually does, do NOT silently rewrite the assertion — flag the disagreement in your report and ask for clarification (the planner may have miscited).
+2. **Cover every Variant, not a representative subset.** If `Variants: positions 0,1,2,3,4,5,6,7` is listed, write 8 assertions (one parameterized test or 8 separate tests), not 2. If `Variants: alphabetic 'A', non-alphabetic ' ', non-alphabetic '#'` is listed, write 3 cases — not just one alphabetic. The planner enumerated variants because the spec actually requires them; covering a subset silently fails coverage.
+3. **Use the cited Expected as the assertion's expected value.** The planner already grounded it in source. Use it verbatim unless step 1 surfaced a disagreement. Do not substitute "approximately equal" or "contains" for an exact equality the planner specified.
+4. After writing the test file, re-read it and walk the CHECKLIST item by item:
+   - For each Tn, find a test in the file whose `// Covers:` (or `# Covers:`) header references the same FQN, whose body asserts the Expected per Variant, and whose inputs cover every listed Variant.
+   - If a match is incomplete (Tn covered but only some Variants), write the missing variant cases now.
+   - If you find no match for a Tn, write the missing test now. Do not skip silently.
+5. If a Tn is genuinely untestable in the current scope (e.g., the function is private, inlined, or requires an unavailable fixture), document the reason in the final report's CHECKLIST COVERAGE section. Do not omit it without justification.
+
+**Do not return `STATUS: SUCCESS` while any Tn or Variant is unchecked and undocumented.** A 9-of-10-checklist-items result is `STATUS: PARTIAL`, not `SUCCESS`. Likewise, a Tn whose listed Variants are 8 but only 2 are exercised in the test is `PARTIAL`, not `SUCCESS`.
 
 ### 5. Verify with Build
 
 Call the `code-testing-builder` sub-agent to compile. Build only the specific test project, not the full solution.
 
-If build fails: call `code-testing-fixer`, rebuild, retry up to 3 times.
+If build fails: call `code-testing-fixer`, rebuild, retry up to 3 times. **You MUST dispatch the fixer for any build error — never declare the phase complete with build failures, never silently skip the fix loop.** This mirrors Rule 7 in the orchestrator.
 
 ### 6. Verify with Tests
 
@@ -76,15 +87,16 @@ Call the `code-testing-tester` sub-agent to run tests.
 
 If tests fail:
 
+- **You MUST dispatch the fixer.** Even one failed test triggers a fixer dispatch — never declare `STATUS: SUCCESS` with failing tests, and never silently accept failures as "minor". This mirrors Rule 7 in the orchestrator.
 - Read the actual test output — note expected vs actual values
 - Read the production code to understand correct behavior
-- Update the assertion to match actual behavior. Common mistakes:
+- The fixer will update the assertion to match actual behavior. Common mistakes the fixer corrects:
   - Hardcoded IDs that don't match derived values
   - Asserting counts in async scenarios without waiting for delivery
   - Assuming constructor defaults that differ from implementation
-- For async/event-driven tests: add explicit waits before asserting
+- For async/event-driven tests: the fixer adds explicit waits before asserting
 - Never mark a test `[Ignore]`, `[Skip]`, or `[Inconclusive]`
-- Retry the fix-test cycle up to 5 times
+- Retry the fix-test cycle up to 5 times. You may stop early ONLY if the same test name fails identically across two consecutive fixer attempts (genuine deadlock — log it in the report).
 
 ### 7. Format Code (mandatory if a lint command exists)
 
@@ -100,12 +112,13 @@ TESTS_PASSING: [count]
 FILES:
 - path/to/TestFile.ext (N tests)
 CHECKLIST COVERAGE:
-- T1 — <test_name_in_file> ✓
-- T2 — <test_name_in_file> ✓
+- T1 — <test_name_in_file> ✓ — variants covered: <list or "single"> — Source cited: <file>:<line-range>
+- T2 — <test_name_in_file> ✓ — variants covered: <list or "single"> — Source cited: <file>:<line-range>
 - T3 — SKIPPED — <reason: e.g., private/inlined/unavailable fixture>
+- T4 — PARTIAL — variants covered: 2/8 — <reason if intentional, otherwise this is a bug — fix before declaring SUCCESS>
 - ...
 ISSUES:
-- [Any unresolved issues]
+- [Any unresolved issues, including fixer deadlocks if the same failure persisted across 2+ fixer attempts]
 ```
 
 `STATUS: SUCCESS` requires every Tn to be either ✓ (covered) or SKIPPED with a documented reason. If any Tn is silently missing, `STATUS` is `PARTIAL` at best.
@@ -119,4 +132,5 @@ ISSUES:
 3. **Match patterns** — follow existing test style
 4. **Be thorough** — cover edge cases
 5. **Report clearly** — state what was done and any issues
-6. **Honor the CHECKLIST** — when the dispatch prompt includes a PHASE CHECKLIST, every Tn must end up either as a corresponding test in the file (`✓`) or as a documented SKIPPED entry with a concrete reason. Silently dropped checklist items are the single most common failure mode and are explicitly forbidden.
+6. **Honor the CHECKLIST** — when the dispatch prompt includes a PHASE CHECKLIST, every Tn must end up either as a corresponding test in the file (`✓`) or as a documented SKIPPED entry with a concrete reason. Every Variant listed under a Tn must appear as an input in the test (a Tn with 8 listed Variants but only 2 covered is `PARTIAL`, not `SUCCESS`). Every assertion's expected value must be grounded in the cited Source line range — read the source before writing the assertion. Silently dropped checklist items, silently dropped variants, and assertions written from imagination instead of source are the three most common failure modes and are explicitly forbidden.
+7. **Never declare SUCCESS while build or tests fail** — Rule 7 in the orchestrator requires that any build error or any failed test triggers a fixer dispatch. The implementer never silently accepts failures as "minor" or "good enough" — dispatch the fixer, re-run, and only declare SUCCESS when build is clean and all tests pass (or document a genuine deadlock after 2+ identical fixer attempts).

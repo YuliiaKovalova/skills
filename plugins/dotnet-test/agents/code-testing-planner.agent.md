@@ -74,21 +74,34 @@ For each file in each phase, specify:
 
 ### 4b. Build a per-phase CHECKLIST (mandatory)
 
-For every phase, after the file/method breakdown, produce a CHECKLIST section that the implementer will use as a verifiable contract:
+For every phase, after the file/method breakdown, produce a CHECKLIST section that the implementer will use as a verifiable contract. The implementer treats this as the contract — it does not re-derive expected values from research, so each item must be self-contained and source-grounded:
 
 ```markdown
 ## CHECKLIST (Phase N)
-- [ ] T1 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
-- [ ] T2 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
-- [ ] T3 — ...
+- [ ] T1 — <test_name> — covers <FQN-from-research>
+      Source: <file>:<line-start>-<line-end>
+      Variants: <list specific inputs/scenarios when behavior covers a range/set/"all of X"; otherwise "single">
+      Expected: <concrete value/state per variant, anchored to <file>:<line> where the implementation produces it>
+- [ ] T2 — <test_name> — covers <FQN-from-research>
+      Source: <...>
+      Variants: <...>
+      Expected: <...>
 ```
 
 Rules for the CHECKLIST:
 
 - **One item per TARGET BEHAVIOR in research.md.** Do not merge two behaviors into one item. Do not drop behaviors. If research.md lists 7 behaviors for the entity, the CHECKLIST has 7 items. The implementer treats this as a contract — every Tn becomes one test in the generated file.
 - **Use research.md's identifiers verbatim.** `<FQN-from-research>` must match a target entity from research.md exactly (same file path, same fully-qualified name). Do not invent entities the researcher did not name; do not paraphrase identifiers.
-- **Concrete assertion, not vague intent.** `<assertion>` states a specific expected outcome — a value (`returns 0`), a state change (`appends to history buffer`), a raised exception type (`raises ValueError`), or an explicit no-op (`leaves cursor.x unchanged`). "Verifies behavior" or "tests the function" is too vague — the implementer cannot derive a passing/failing assertion from it.
-- **One sentence per item.** If the assertion does not fit in one sentence, the behavior is too coarse — split it into two CHECKLIST items.
+- **Source is mandatory.** For every item, cite the EXACT line range of the implementation. You must `view` that range yourself before writing the item — do not guess. The implementer relies on this citation to read the source and ground its assertion. A CHECKLIST item without `Source:` is incomplete.
+- **Variants is mandatory.** When the behavior includes plurals/ranges/sets ("all positions 0-7", "various character types", "multiple scenarios"), enumerate every variant the implementer must include — do not let the implementer guess "a representative subset". Examples:
+  - GOOD: `Variants: positions 0,1,2,3,4,5,6,7` (8 explicit variants)
+  - BAD: `Variants: various positions` (vague — implementer will pick 2)
+  - GOOD: `Variants: alphabetic 'A', non-alphabetic ' ', non-alphabetic '#'`
+  - BAD: `Variants: different character types` (vague)
+  - GOOD: `Variants: small numeric suffix '-1', large numeric suffix '-99999'`
+  - When the behavior is genuinely a single scenario with no enumeration, write `Variants: single`.
+- **Expected is mandatory and concrete.** State the specific value/state per variant — a value (`returns 'AA' at x=2`), a state change (`appends to history buffer`), a raised exception type (`raises ValueError("invalid")`), or an explicit no-op (`leaves cursor.x unchanged`). For each expected outcome, briefly cite where in the source the value is produced (e.g., `derived from screen.c:447 — branch returns prefix repeated count times`). The implementer uses these as the assertion's expected values without re-deriving them — vague expecteds become wrong assertions.
+- **Compactness.** Each Tn should fit on 4 lines (header + Source + Variants + Expected). If Expected needs more than one short paragraph, the behavior is too coarse — split it into two CHECKLIST items.
 
 ### 5. Generate Plan Document
 
@@ -155,7 +168,7 @@ What this phase accomplishes and why it's first.
 3. **Be incremental** — each phase should be independently valuable
 4. **Include patterns** — show code templates for the language
 5. **Match existing style** — follow patterns from existing tests if any
-6. **Every phase has a CHECKLIST** — one item per TARGET BEHAVIOR in research.md, never dropped, never merged. The CHECKLIST is the implementer's contract; without it, behaviors get silently omitted at implementation time.
+6. **Every phase has a CHECKLIST** — one item per TARGET BEHAVIOR in research.md, never dropped, never merged. Each item must include `Source: <file>:<line-range>`, `Variants: <enumerated list or "single">`, and `Expected: <concrete value/state per variant, anchored to source line>`. The CHECKLIST is the implementer's contract; vague or incomplete items produce wrong assertions because the implementer takes the contract literally and does not re-derive expected values.
 
 ## Output
 

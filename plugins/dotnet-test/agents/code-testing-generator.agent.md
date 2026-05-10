@@ -96,6 +96,26 @@ For a single-function request, the planner produces a one-phase plan with one CH
 
 Why: research.md lists target behaviors as bulletable prose. The implementer has no machine-checkable obligation to cover each one. A planner-produced CHECKLIST converts the bullets into a discrete list with names and assertions; the implementer is then required (Rule 6 in `code-testing-implementer`) to map every checklist item to a `// Covers:` comment in the generated test file before returning. This closes the most common failure mode (research correctly identifies a behavior, implementer omits the assertion).
 
+### Rule 7: Every build/test failure MUST trigger a fixer dispatch — no silent acceptance
+
+If `code-testing-builder` returns ANY error, OR if `code-testing-tester` returns ANY failed/errored test, you MUST dispatch `code-testing-fixer` before declaring the run complete. There are no exceptions, no "good enough" early exit, and no inline tolerance — even a single failing test means dispatch the fixer.
+
+```text
+✅ builder fails  → dispatch fixer → re-dispatch builder         (mandatory)
+✅ tester reports N>0 failures → dispatch fixer → re-dispatch tester  (mandatory)
+❌ tester reports 5 failures → orchestrator writes summary and returns   // forbidden — silent acceptance
+❌ orchestrator decides failures look "minor" and skips fixer            // forbidden
+❌ orchestrator runs out of dispatch budget mid-cycle                    // do at least one fixer pass
+```
+
+Per-strategy obligations:
+- **Direct** (single-phase): after Step 7's tester returns, if any test failed, dispatch fixer once minimum, then re-run tester once. Repeat up to 3 cycles.
+- **Single pass** / **Iterative**: same — Step 6's build failure and Step 7's test failure both require a fixer dispatch before Step 8.
+
+You may stop the fixer loop early only if the **same test name fails identically across two consecutive fixer attempts** (genuine non-flaky deadlock — log it in the final report). You may NOT stop because failures "look acceptable" or because you ran out of patience.
+
+Why: measurement on prior runs shows that when the tester reported failed tests, the orchestrator dispatched the fixer in only ~10% of cases — broken patches were silently shipped in the other 90%. The fixer is the only subagent that can re-derive expected values from production source after a wrong assertion is written; skipping it leaves weak/wrong assertions in the patch.
+
 ## Pipeline Overview
 
 1. **Research** — Understand the codebase structure, testing patterns, and what needs testing
@@ -223,14 +243,22 @@ task({
   THEN, for each phase, produce a CHECKLIST section in this exact format:
 
   ## CHECKLIST (Phase N)
-  - [ ] T1 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
-  - [ ] T2 — <test_name> — covers <FQN-from-research> — assertion: <one-sentence concrete expected outcome>
+  - [ ] T1 — <test_name> — covers <FQN-from-research>
+        Source: <file>:<line-start>-<line-end>
+        Variants: <list specific inputs/scenarios when behavior covers a range, set, or "all of X"; otherwise write "single">
+        Expected: <concrete value/state per variant, each anchored to <file>:<line> where the implementation produces it>
+  - [ ] T2 — <test_name> — covers <FQN-from-research>
+        Source: <file>:<line-start>-<line-end>
+        Variants: <...>
+        Expected: <...>
   - ...
 
   Rules for the CHECKLIST:
   - Produce ONE checklist item per TARGET BEHAVIOR listed in research.md. Do not merge two behaviors into one item; do not drop behaviors. If research.md lists 7 behaviors for the entity, the checklist has 7 items.
   - Each <FQN-from-research> must match a target entity from research.md verbatim (same file path, same fully-qualified name). Do not invent entities the researcher did not name.
-  - Each <assertion> states a concrete expected outcome (a value, a state change, a raised exception type), not a vague intent ('verifies behavior'). The implementer will use this assertion as the pass criterion.
+  - **Source is mandatory.** Cite the EXACT line range in the source file where the behavior is implemented (you must `view` that range before writing the item — do not guess). Without `Source:` the implementer cannot ground the assertion in the actual code.
+  - **Variants is mandatory.** When the behavior says "for all X", "with various Y", "across cases A/B/C", or covers a range/set/enumeration, list every variant the implementer must include. Examples: `Variants: positions 0,1,2,3,4,5,6,7` (NOT just "0 and 7"); `Variants: alphabetic 'A', non-alphabetic ' ', non-alphabetic '#'` (NOT just "A and B"); `Variants: small suffix '-1', large numeric suffix '-99999'`. If the behavior is genuinely a single scenario, write `Variants: single`.
+  - **Expected is mandatory and concrete.** State the specific value/state per variant (e.g., `returns 'AA' at x=2`, `raises ValueError("invalid")`, `cursor.x unchanged`). For each expected outcome, briefly cite where in the source the value is produced (e.g., `derived from screen.c:447 (line returns prefix*2)`). The implementer uses these as the assertion's expected values without re-deriving them.
   - For [scope=single-phase] (Direct mode), produce exactly one phase. Do not split into Phase 1 / Phase 2 — Direct mode is one phase by definition.
 
   Do not group unrelated entities into one phase. If the research identified 3 distinct classes that need testing, produce 3 phases (one per class) so each implementer dispatch has a focused scope.
@@ -258,16 +286,24 @@ task({
   - <fully-qualified-name-2> at <file>:<line> — covers behaviors: <bullet list from plan>
 
   PHASE CHECKLIST (mandatory — copy verbatim from .testagent/plan.md ## CHECKLIST (Phase N)):
-  - [ ] T1 — <test_name> — covers <FQN> — assertion: <concrete outcome>
-  - [ ] T2 — <test_name> — covers <FQN> — assertion: <concrete outcome>
+  - [ ] T1 — <test_name> — covers <FQN>
+        Source: <file>:<line-start>-<line-end>
+        Variants: <list or "single">
+        Expected: <concrete value/state per variant, anchored to <file>:<line>>
+  - [ ] T2 — <test_name> — covers <FQN>
+        Source: <...>
+        Variants: <...>
+        Expected: <...>
   - ...
 
   Write tests ONLY for the listed target entities. If the planner says to test 'BitExtendedField.i2m', do not substitute a similarly-named entity ('UVarIntField.i2m') even if it looks related — go back to the plan and verify, or ask for clarification.
 
   CHECKLIST COMPLETION (mandatory — Rule 6 in your own agent prompt requires this):
-  - For each Tn in the PHASE CHECKLIST above, write one test whose `// Covers:` (or `# Covers:`) header references the same FQN AND whose body asserts the listed concrete outcome. The test name should match or closely reflect <test_name>.
-  - Before returning your final report, perform a self-check: re-read the test file you wrote and confirm there is exactly one test for each Tn. If any Tn has no corresponding test, write it before returning. Do NOT return PHASE: SUCCESS while any Tn is unchecked.
-  - In your final report, include a 'CHECKLIST COVERAGE' section listing each Tn and the test name that covers it. If any Tn is intentionally skipped, state why (e.g., 'T5 unreachable — function is inlined / private to module / requires unavailable fixture') — do not silently drop items.
+  - For each Tn, BEFORE writing the assertion you must `view` the cited Source range and confirm it produces the Expected value(s). Do not paraphrase research; ground the expected value in the source the planner cited.
+  - For each Tn whose Variants list is non-"single", write one parameterized test (or one test per variant) covering EVERY listed variant — not a representative subset. "positions 0,1,2,3,4,5,6,7" means 8 assertions, not 2.
+  - Write one test whose `// Covers:` (or `# Covers:`) header references the same FQN AND whose body asserts the listed Expected. The test name should match or closely reflect <test_name>.
+  - Before returning your final report, perform a self-check: re-read the test file you wrote and confirm there is exactly one test for each Tn, and that all listed Variants appear as inputs. If any Tn has no corresponding test, or any Variant is missing, fix it before returning. Do NOT return PHASE: SUCCESS while any Tn or Variant is uncovered.
+  - In your final report, include a 'CHECKLIST COVERAGE' section listing each Tn with: test name, variants covered (`v1, v2, …` or `single`), and source-line citation. If any Tn is intentionally skipped, state why (e.g., 'T5 unreachable — function is inlined / private to module / requires unavailable fixture') — do not silently drop items.
 
   TEST TRACEABILITY (mandatory):
   - Each test you write must start with a single-line comment header naming the entity under test, in the form:
@@ -314,7 +350,7 @@ task({
 })
 ```
 
-If it fails, dispatch the fixer, rebuild, retry up to 3 times.
+If it fails, **Rule 7 applies — you MUST dispatch the fixer; do not skip and do not declare success with build errors.** Rebuild after the fixer returns; retry up to 3 times. If the third fixer attempt still leaves the same error, document the deadlock in the final report (do not silently ship a broken build).
 
 ```text
 task({
@@ -340,11 +376,12 @@ task({
 
 If tests fail:
 
-- **Wrong assertions** — read production code, fix the expected value. Never `[Ignore]` or `[Skip]` a test just to pass.
-- **Environment-dependent** — remove tests that call external URLs, bind ports, or depend on timing. Prefer mocked unit tests.
-- **Pre-existing failures** — note them but don't block.
+- **Rule 7 applies — you MUST dispatch the fixer; do not silently accept failed tests as 'good enough'.** Even one failed test triggers a fixer dispatch. Re-run the tester after each fixer return. Repeat up to 3 cycles.
+- **Wrong assertions** — the fixer will read production code and correct the expected value. Never `[Ignore]` or `[Skip]` a test just to pass.
+- **Environment-dependent** — the fixer can remove tests that call external URLs, bind ports, or depend on timing. Prefer mocked unit tests.
+- **Pre-existing failures** — note them in the final report but they still must go through fixer (so the fixer can confirm they are pre-existing, not regressions caused by this run).
 
-If failures are present, dispatch the fixer (Step 6 prompt) and re-run the tester. Repeat up to 3 cycles.
+You may stop the fixer→tester loop early ONLY if the same test name fails identically across two consecutive fixer attempts (genuine deadlock — log it in the final report). You may NOT stop because remaining failures "look minor" or "look acceptable" — that is the silent-acceptance failure mode Rule 7 forbids.
 
 ### Step 8: Coverage Gap Iteration
 
