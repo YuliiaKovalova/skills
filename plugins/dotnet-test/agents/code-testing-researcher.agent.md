@@ -93,7 +93,28 @@ Locate all existing test files and analyze what they cover:
   - Whether tests cover only happy paths or also edge cases and error paths
 - Record the estimated coverage level per source file so the planner can prioritize gaps
 
-### 8. Generate Research Document
+### 8. Extract Local Test Naming & Style Conventions
+
+Sample **at least 3** existing test files in the test project (or 5 if the project is large). For each sampled file, read the actual file contents (`view` it — do not infer from filenames) and record what you observe:
+
+- **Test method naming pattern.** What is the literal symbol shape used for individual test methods? Examples of patterns to recognize from real projects:
+  - `Test<FunctionName>` (Go default — `TestParse`, `TestHandle`)
+  - `Test<FunctionName>_<Scenario>` (Go with scenarios — `TestParse_EmptyInput`)
+  - `test_<function_name>_<scenario>` (Python pytest — `test_parse_empty_input`)
+  - `<MethodName>_<Scenario>_<ExpectedResult>` (C# AAA — `Parse_EmptyInput_Throws`)
+  - `should <do something>` (Mocha BDD — `it('should return false for empty input')`)
+  - Block headers like `= functionname() <description>` (Scapy doctest-style)
+  - Or any project-specific convention you find by reading the files
+  Record the pattern as a literal template, e.g., `Test<FunctionName>_<Scenario>` — do NOT generalize or paraphrase. If different files use different patterns, record each one with the file it came from.
+- **Scenario-tail length and style.** From the sampled tests, what is the typical length of the scenario portion of the test name? (1-2 words, 3-4 words, longer descriptive sentences, none — just the function name?). Record what is *actually idiomatic for THIS project*, not what is good test naming in general.
+- **Parameterization vs. one-method-per-case.** When a single behavior has multiple input variants, does the project use parameterized tests (`@pytest.mark.parametrize`, table-driven `for _, tc := range cases`, `[Theory]/[InlineData]`, `it.each`), or does it write one method per variant? Record which convention the project uses.
+- **Helper/fixture/setup conventions.** What helper functions, fixtures, base classes, or assertion helpers does the existing test code use repeatedly? Record their names and a one-line purpose so later phases can reuse them.
+- **Assertion style.** What assertion library is used (`assert`, `Assert.That`, `expect()`, `require.Equal`, `assertEqual`, `cmp.Diff`, etc.)? Are tests using exact-equality (`==`, `Equal`) or fuzzy predicates (`Contains`, `assertIn`)?
+- **File and class naming.** What is the test FILE naming pattern (`<source>_test.go`, `<Source>Tests.cs`, `test_<source>.py`, `<source>.spec.ts`)? Is there a class wrapper (`class TestX`) or are tests at module scope?
+
+If no existing test files exist in the project, record `## Test Naming & Style Conventions: NONE FOUND — language defaults apply` and DO NOT invent a convention. The planner will then fall back to language defaults.
+
+### 9. Generate Research Document
 
 Create `.testagent/research.md` with this structure:
 
@@ -150,6 +171,18 @@ For each test project found, list:
 ## Testing Patterns
 - [Patterns discovered from existing tests]
 - [Or recommended patterns for the framework]
+
+## Test Naming & Style Conventions
+*Extracted by reading at least 3 existing test files. If none exist, write `NONE FOUND — language defaults apply` and the planner will fall back to language defaults.*
+
+- **Sampled files**: `[path/to/test_file_1.ext]`, `[path/to/test_file_2.ext]`, `[path/to/test_file_3.ext]`
+- **Test method naming pattern (literal template)**: e.g. `Test<FunctionName>_<Scenario>` or `test_<function>_<scenario>` — write the LITERAL template observed; if multiple patterns exist in the codebase, list each one with the file it came from
+- **Typical scenario-tail length**: e.g. `1-2 words`, `3-4 words`, `descriptive sentence`, `none — function name only`
+- **Parameterization style**: e.g. `table-driven for _, tc := range cases`, `@pytest.mark.parametrize`, `[Theory]/[InlineData]`, `it.each`, or `one method per case`
+- **Reusable helpers / fixtures**: e.g. `assertContinued(...)` (kitty-style helper for is_continued flag), `setupTestServer()` (returns *httptest.Server), `mock_emitter` fixture
+- **Assertion style**: e.g. `require.Equal(t, expected, actual)`, `assert expected == actual`, `Assert.AreEqual(expected, actual)`, `expect(actual).toBe(expected)`
+- **File naming pattern**: e.g. `<source>_test.go`, `test_<source>.py`, `<Source>Tests.cs`, `<source>.spec.ts`
+- **Class wrapper convention**: e.g. `class TestX(unittest.TestCase)`, module-scope functions, `describe('X', () => { ... })`
 
 ## Recommendations
 - [Priority order for test generation]
