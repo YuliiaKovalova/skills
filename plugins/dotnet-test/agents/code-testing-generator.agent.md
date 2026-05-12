@@ -66,6 +66,13 @@ runSubagent({
 
 Output: `.testagent/research.md`
 
+After the researcher returns, **verify `.testagent/research.md` answers two questions explicitly**:
+
+1. *Which unit (function/class/method) is under test*, with a file:line citation.
+2. *Which behaviors need exercising* (positive paths, negative/error paths, edge cases relevant to the request).
+
+If either is missing or vague, call the researcher one more time with a narrow scope to fill the gap. If both are present, proceed to Step 4 — do not call the researcher again unless `.testagent/research.md` is later proven wrong (e.g., the implementer cannot find the unit).
+
 ### Step 4: Planning Phase
 
 Call the `code-testing-planner` subagent:
