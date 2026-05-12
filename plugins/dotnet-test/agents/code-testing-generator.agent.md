@@ -33,15 +33,15 @@ If a sub-task is too small to warrant a CTA sub-agent, **do it yourself** with `
 
 | You need to… | Dispatch this named agent (NOT a generic helper) |
 |---|---|
-| Initial scoping research (every run, in Step 1b) | `dotnet-test:code-testing-researcher` |
-| Diagnose an unfamiliar test failure | `dotnet-test:code-testing-researcher` (additional dispatch with narrow scope) |
-| Read codebase structure / find test framework / discover existing tests | `dotnet-test:code-testing-researcher` |
+| Initial scoping research (every run, in Step 1b) | `dotnet-test:code-testing-researcher` (the **only** routine researcher dispatch — see Rule 8 for re-dispatch exceptions) |
+| Diagnose an unfamiliar test failure | Read source files directly with `read` / `search` (subject to Rules 4 and 5). Re-dispatch researcher only if a Rule 8 exception applies. |
+| Read codebase structure / find test framework / discover existing tests | Already covered by the Step 1b researcher dispatch — do not dispatch again unless a Rule 8 exception applies |
 | Translate research into a per-phase plan (every run, in Step 4) | `dotnet-test:code-testing-planner` |
 | Write tests for one phase / file / function | `dotnet-test:code-testing-implementer` |
 | Run a workspace build and report errors | `dotnet-test:code-testing-builder` |
 | Run a test suite and parse failures | `dotnet-test:code-testing-tester` |
 | Fix any test failure (mandatory — never fix tests inline yourself, dispatch the fixer) | `dotnet-test:code-testing-fixer` |
-| Lint / format generated code (mandatory after every implementer dispatch finishes if a lint command exists) | `dotnet-test:code-testing-linter` |
+| Format / fix analyzer or style-only build failures the fixer cannot resolve | `dotnet-test:code-testing-linter` (reactive only — see Rule 8) |
 
 If the work matches one of these rows, dispatch the named CTA agent. Do not call generic `explore` / `general-purpose` / `task` for these jobs.
 
@@ -100,6 +100,37 @@ If `code-testing-builder` returns ANY error, OR if `code-testing-tester` returns
 
 You may stop the fixer loop early only if the **same test name fails identically across two consecutive fixer attempts** (genuine non-flaky deadlock — log it in the final report).
 
+### Rule 8: Per-run dispatch caps — keep the pipeline footprint proportional to task scope
+
+Most test-generation tasks add a small number of test functions to a single file. The pipeline footprint must stay proportional to that scope. Apply these caps to every run:
+
+| Agent | Cap per run | Notes |
+|---|---|---|
+| `code-testing-researcher` | **1 by default** (the Step 1b dispatch) | Subsequent steps reuse `.testagent/research.md`. A second researcher dispatch is allowed only with concrete evidence that Step 1b's research was wrong or materially incomplete (see exceptions below). |
+| `code-testing-linter` | **0 proactive dispatches** | Do not dispatch the linter as a routine step. It may be dispatched **reactively** only when build/test failures are explicitly formatting/analyzer/style-only (StyleCop, `.editorconfig`, formatter, analyzer-rule violations) AND the fixer cannot resolve them directly. |
+| `code-testing-planner` | 1 per run (Step 4) | Plus 1 if Step 8 coverage-gap iteration runs. |
+| `code-testing-implementer` | 1 per phase | One dispatch per phase from the plan; do not split into multiple calls per phase. |
+| `code-testing-builder` / `code-testing-tester` / `code-testing-fixer` | as needed | Bounded by the Step 6/7 retry caps (3 cycles). |
+
+**Researcher re-dispatch exceptions** (concrete triggers — any one is sufficient):
+
+- The planner returns reporting that `.testagent/research.md` lacks context needed to plan (missing framework, missing source target, ambiguous scope).
+- The implementer cannot identify the unit under test or its dependencies from `research.md`.
+- Direct `read` / `search` reveals Step 1b targeted the wrong file, project, or subsystem.
+- Build/test passes but generated tests do not exercise the requested behavior, and gap analysis points to an unfamiliar subsystem.
+- Step 6/7 fixer cycles have exhausted their 3 retries on a genuinely unfamiliar failure.
+
+If none of these triggers fire, do not re-dispatch the researcher — supplement context with direct `read` / `search` instead (subject to a soft budget: prefer at most ~5 direct exploration calls before falling back to the researcher exception).
+
+```text
+✅ researcher (1×) → planner → implementer → builder → tester → fixer → tester
+✅ researcher (1×) → planner reports "scope ambiguous" → researcher (2nd, narrow scope) → planner → implementer ...
+❌ researcher (1×) → planner → implementer → tester fails on a known assertion → researcher (additional)        // forbidden: use fixer, not researcher
+❌ implementer → linter → builder → tester                                                                       // forbidden: linter is not a routine step
+```
+
+The researcher cap eliminates redundant context-loading for small-scope tasks while preserving an escape hatch for genuine scoping errors. The linter is moved out of the routine path because its observed firing rate is near zero in practice and proactive dispatches add turn-cost without test-quality return; reactive use for analyzer/style failures is preserved.
+
 ## Pipeline Overview
 
 1. **Research** — Understand the codebase structure, testing patterns, and what needs testing
@@ -126,7 +157,7 @@ task({
 })
 ```
 
-You may dispatch the researcher additional times during the run with narrower scopes. Each additional research dispatch is allowed.
+You may dispatch the researcher additional times during the run only if a Rule 8 re-dispatch exception applies (mis-scoped initial research, planner reports insufficient context, implementer cannot identify the unit under test, etc.). Otherwise, this Step 1b dispatch is the **only** researcher dispatch for the run.
 
 ### Step 2: Choose Execution Strategy
 
@@ -134,7 +165,7 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 | Strategy | When to use | What to do |
 | ---------- | ------------- | ------------ |
-| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | "Direct" means **one phase**, NOT "do it inline" — Rules 4, 5, and 6 still apply: NO `edit` for test files, NO `terminal` for build/test, NO skipping the planner. Dispatch the named CTA pipeline with **narrow scope**: (1) dispatch `code-testing-planner` once with `[scope=single-phase]` hint to produce a one-phase plan. (2) dispatch `code-testing-implementer` once, scoped to just the requested function/class. (3) dispatch `code-testing-builder` to compile. (4) dispatch `code-testing-tester` to run. (5) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. (6) **MANDATORY** at end: dispatch `code-testing-linter` to format and lint generated test files (if a lint command exists). Then proceed to Steps 6-9 for validation and reporting (which also dispatch builder/tester/fixer/validator). |
+| **Direct** | A small, self-contained request (e.g., tests for a single function or class) that you can complete without the full pipeline | "Direct" means **one phase**, NOT "do it inline" — Rules 4, 5, and 6 still apply: NO `edit` for test files, NO `terminal` for build/test, NO skipping the planner. Dispatch the named CTA pipeline with **narrow scope**: (1) dispatch `code-testing-planner` once with `[scope=single-phase]` hint to produce a one-phase plan. (2) dispatch `code-testing-implementer` once, scoped to just the requested function/class. (3) dispatch `code-testing-builder` to compile. (4) dispatch `code-testing-tester` to run. (5) **MANDATORY**: if any failure surfaced, dispatch `code-testing-fixer`; then re-dispatch `code-testing-tester`. Then proceed to Steps 6-9 for validation and reporting (which also dispatch builder/tester/fixer/validator). The linter is **not dispatched routinely** — only reactively if a build/test failure is explicitly formatter/analyzer/style-only and the fixer cannot resolve it (Rule 8). |
 | **Single pass** | A moderate scope (couple projects or modules) that a single Research → Plan → Implement cycle can cover | Execute Steps 3-8 once, then proceed to Step 9. |
 | **Iterative** | A large scope or ambitious coverage target that one pass cannot satisfy | Execute Steps 3-8, then re-evaluate coverage. If the target is not met, repeat Steps 3-8 with a narrowed focus on remaining gaps. Use unique names for each iteration's `.testagent/` documents (e.g., `research-2.md`, `plan-2.md`) so earlier results are not overwritten. Continue until the target is met or all reasonable targets are exhausted, then proceed to Step 9. |
 
@@ -155,15 +186,11 @@ Based on the request scope, pick exactly one strategy and follow it:
 
 ### Step 3: Research Phase
 
-```text
-task({
-  agent_type: "dotnet-test:code-testing-researcher",
-  name: "researcher",
-  prompt: "Research the codebase at [PATH] for test generation. Identify: project structure, existing tests, source files to test, testing framework, build/test commands. Build a dependency graph and estimate preexisting coverage. Write findings to .testagent/research.md."
-})
-```
+The researcher was already dispatched in Step 1b (Rule 8: 1 researcher dispatch by default). **Do not dispatch the researcher again here.** Use `.testagent/research.md` produced by Step 1b as the input to the planner in Step 4.
 
-Output: `.testagent/research.md`
+If `.testagent/research.md` is materially insufficient (one of the Rule 8 re-dispatch exceptions applies — e.g., the planner reports ambiguous scope, the implementer cannot identify the unit under test, or direct `read`/`search` reveals Step 1b targeted the wrong area), you may dispatch a second, narrowly-scoped researcher call. Otherwise, supplement context by reading source files yourself with `read` / `search` (subject to Rules 4 and 5).
+
+Output (already produced in Step 1b): `.testagent/research.md`
 
 ### Step 4: Planning Phase
 
@@ -247,17 +274,17 @@ After the previous phases complete, check for uncovered source files:
 1. List all source files in scope.
 2. List all test files created.
 3. Identify source files with no corresponding test file.
-4. If gaps remain, dispatch a focused researcher → planner → implementer cycle:
+4. If gaps remain, dispatch a focused planner → implementer cycle. **Do not re-dispatch the researcher** for routine gap iteration (Rule 8); use the existing `.testagent/research.md` plus targeted `read` / `search` of the uncovered source files to brief the planner via its prompt. Re-dispatch the researcher only if a Rule 8 exception applies (e.g., the gap touches a subsystem not covered by the original research).
 
 ```text
 task({
-  agent_type: "dotnet-test:code-testing-researcher",
-  name: "researcher-gap",
-  prompt: "Re-research scoped to: [specific uncovered files/functions]. Write findings to .testagent/research-2.md."
+  agent_type: "dotnet-test:code-testing-planner",
+  name: "planner-gap",
+  prompt: "Plan tests for these uncovered files: [list]. Use .testagent/research.md as context. Write the gap plan to .testagent/plan-2.md."
 })
 ```
 
-Then re-run planner (writing `.testagent/plan-2.md`) and implementer for the gap phase, followed by builder/tester/fixer cycles. Do this at most once per run; if the second iteration also leaves gaps, list them in the final report rather than looping further.
+Then run implementer for the gap phase, followed by builder/tester/fixer cycles. Do this at most once per run; if the second iteration also leaves gaps, list them in the final report rather than looping further.
 
 ### Step 9: Validate Diff and Clean Up
 
