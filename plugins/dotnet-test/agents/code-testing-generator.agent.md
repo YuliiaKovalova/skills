@@ -184,6 +184,13 @@ task({
 
 Output: `.testagent/plan.md`
 
+After the planner returns, **verify `.testagent/plan.md` answers two questions explicitly**:
+
+1. *Is each Tn's `Expected` value a specific assertion contract* — exact value, error type, or message substring — not "returns correctly" or "returns error", with a file:line citation to the source line that establishes it.
+2. *For Tn that exercise an error / fallback / negative path, does `Expected` name what distinguishes the failure* (error type, sentinel value, or message substring) so a mutation that changes the failure mode would be caught.
+
+If either is missing for a Tn, dispatch the planner one more time with narrow scope to fill the gap. If both are present, proceed to Step 5 — do not dispatch the planner again unless the implementer later cannot map an `Expected` value to an assertion.
+
 ### Step 5: Implementation Phase
 
 Execute each phase by dispatching the implementer once, sequentially:
