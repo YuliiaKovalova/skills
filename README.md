@@ -24,7 +24,7 @@ Plugin support is component-specific:
 
 | Plugin | Description |
 |--------|-------------|
-| [dotnet](plugins/dotnet/) | High-level .NET development skills, a task-routed MSBuild troubleshooting entry point using binary-log replay, and C# language server (LSP) integration for hosts that support it. |
+| [dotnet](plugins/dotnet/) | High-level .NET development skills plus C# language server (LSP) integration for hosts that support it. |
 | [dotnet-advanced](plugins/dotnet-advanced/) | Collection of .NET skills for handling specific .NET tasks for special scenarios. |
 | [dotnet-data](plugins/dotnet-data/) | Skills for .NET data access and Entity Framework related tasks. |
 | [dotnet-diag](plugins/dotnet-diag/) | Skills for .NET performance investigations, debugging, and incident analysis. |

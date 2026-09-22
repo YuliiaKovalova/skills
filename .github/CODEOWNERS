@@ -8,8 +8,6 @@
 # msbuild
 /plugins/dotnet-msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
 /tests/dotnet-msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
-/plugins/dotnet/skills/msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
-/tests/dotnet/msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
 
 # dotnet (common everyday C#/.NET)
 /plugins/dotnet/skills/setup-local-sdk/ @dotnet/roslyn-ide @dotnet/skills-csharp-language-reviewers
