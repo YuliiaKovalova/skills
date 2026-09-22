@@ -1,5 +1,0 @@
-<Project>
-  <PropertyGroup>
-    <HookTrace>$(HookTrace)first;</HookTrace>
-  </PropertyGroup>
-</Project>

@@ -1,40 +1,9 @@
-# Capture and replay binary logs
+# Generate binary logs
 
-Capture is a shared prerequisite **when needed**, not a separate mandatory workflow for every
-build command. If the supplied log already records the relevant failure or performance scenario,
-replay it first. Do not rerun a build just to rename its log.
-
-## Replay an existing log
-
-Use MSBuild's binary-log replay to write **new** local text logs. It reads the recorded events
-without rebuilding the original project, so the original checkout does not need to be available:
-
-```powershell
-dotnet msbuild build.binlog -noconlog -fl "-flp:logfile=build-01.diag.log;verbosity=diagnostic;PerformanceSummary" -fl1 "-flp1:logfile=build-01.errors.log;errorsonly" -fl2 "-flp2:logfile=build-01.warnings.log;warningsonly"
-```
-
-Substitute the supplied `.binlog` path and choose unused output filenames before running the
-command. Quote each complete semicolon-delimited logger argument, especially in PowerShell.
-A compatible `MSBuild.exe` can replace `dotnet msbuild`; no additional analysis package is needed.
-
-Confirm replay completed and produced a nonempty diagnostic log. An errors-only or warnings-only
-log can legitimately be empty. Read/search the **text** logs, never the binary file. For example:
-
-```powershell
-Get-Content .\build-01.errors.log
-Select-String -Path .\build-01.diag.log -Pattern 'Performance Summary', 'Skipping target', 'FAILED'
-```
-
-Start failure diagnosis with the recorded errors, then inspect related project/target/task
-events and values in the diagnostic log. Start performance diagnosis with the Project, Target,
-and Task Performance Summaries, then inspect the underlying events and skip reasons.
-
-Replay success does not mean the original build succeeded, and **replay duration is not build
-duration**. Use the recorded build result/timings and original measurements. Replay cannot
-manufacture events that were not captured or guarantee extraction of embedded project/import
-source. If a compatible installed MSBuild cannot read the log, or required source, evaluation,
-or scheduling data is absent from the text output, state the limitation and the missing evidence.
-Do not invent values, silently switch to binary-file text parsing, or rebuild a missing checkout.
+Based on the original `binlog-generation` skill, reduced to capture, verification, and retention.
+Capture a log for the build being investigated, not as an unconditional rule for every .NET task.
+If a matching log already exists, use [MSBuild replay](binlog-failure-analysis.md#replay-a-binary-log)
+instead of rerunning the build.
 
 ## Preserve the operation
 
@@ -43,20 +12,22 @@ directory, target, configuration, framework, runtime, restore behavior, and glob
 Do not replace a repository wrapper with a bare `dotnet build` unless the wrapper's equivalent
 invocation is known.
 
-For MSBuild 17.8+ (.NET 8 SDK+), quote a filename containing `{}` to get a distinct artifact:
+Choose an unused filename before each invocation. The examples below assume these paths do not
+already exist:
 
 ```powershell
-dotnet build App.sln -c Release --no-restore "-bl:build-{}.binlog"
-dotnet msbuild App.csproj -t:Pack "-bl:pack-{}.binlog"
+dotnet build App.sln -c Release --no-restore "-bl:build-01.binlog"
+dotnet msbuild App.csproj -t:Pack "-bl:pack-01.binlog"
 ```
 
-The quotes pass the braces literally in PowerShell, without treating them as a script block.
-The same quoted argument works in common command shells. These are examples: retain the user's
-actual arguments rather than substituting these project names or adding `--no-restore`.
+Retain the user's actual arguments rather than substituting these project names or adding
+`--no-restore`. Every comparison or retry needs a different log path; do not use bare `-bl`,
+which reuses `msbuild.binlog`.
 
-For an older MSBuild, or a CI uploader that requires a known name, first check existing artifacts
-and choose an unused explicit name such as `failure-02.binlog`. Every invocation in a comparison
-or retry sequence needs a different name. Do not use bare `-bl`, which reuses `msbuild.binlog`.
+Automatic `{}` filenames are optional and toolset-dependent. Do not assume every .NET 8 SDK
+supports expansion. If support is confirmed, quote the complete argument in PowerShell, such as
+`"-bl:build-{}.binlog"`, and verify that the resulting name actually expanded. Explicit unused
+names avoid that compatibility issue and also work for CI uploaders needing a known path.
 
 `dotnet build`, `restore`, `pack`, and `publish` accept MSBuild logger switches. Test runners and
 wrapper scripts differ: only forward `-bl` through a supported MSBuild argument surface. A
@@ -77,7 +48,8 @@ An intentional failing build can still produce a useful log. Failure before MSBu
 condition; do not invent a path or repeatedly rebuild without addressing it.
 
 Keep the path, original exit code, and scenario together. For a capture-only request, this is the
-deliverable. For an investigation, replay the new artifact and return to the selected task reference.
+deliverable. Otherwise continue to [failure analysis](binlog-failure-analysis.md) or
+[performance diagnostics](build-perf-diagnostics.md).
 
 ## Privacy and retention
 
@@ -89,7 +61,7 @@ do not use a repository-wide clean to prepare capture.
 If embedding imported files is inappropriate, use a quoted logger argument such as:
 
 ```powershell
-dotnet build App.csproj "-bl:build-{}.binlog;ProjectImports=None"
+dotnet build App.csproj "-bl:build-02.binlog;ProjectImports=None"
 ```
 
 `ProjectImports=None` reduces embedded source coverage; it does **not** redact secrets from

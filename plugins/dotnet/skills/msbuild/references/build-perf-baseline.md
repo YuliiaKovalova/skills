@@ -1,353 +1,478 @@
-# Build performance baseline and controlled experiments
+# Build Performance Baseline & Optimization
 
-Use this reference to establish a trustworthy before/after baseline or to run one
-advanced experiment selected by the
-[performance task guide](troubleshoot-performance.md). It preserves the full
-baseline workflow; output-layout, reproducibility, dependency, graph, parallelism,
-and inner-loop controls are optional branches, not a blanket optimization recipe.
+Source: original `build-perf-baseline` skill.
 
-For file-reading tools, resolve sibling references under the skill root's
-`references` directory. Use [binary-log capture and replay](binlog-generation.md)
-for capture details, MSBuild replay of existing artifacts, and privacy handling.
+## Overview
 
-## Measurement protocol
+Before optimizing a build, you need a **baseline**. Without measurements,
+optimization is guesswork. This reference covers establishing baselines and
+applying systematic, measured optimization techniques.
 
-### Freeze the experiment
+**Related references:**
+- [Build performance diagnostics](build-perf-diagnostics.md) - binlog-based bottleneck identification
+- [Incremental builds](incremental-build.md) - Inputs/Outputs and up-to-date checks
+- [Parallel build tuning](#step-6-parallel-build-tuning) - parallelism and critical paths
+- [Evaluation performance](eval-performance.md) - glob and import-chain optimization
 
-Record the repository revision and relevant local changes; exact project,
-solution, or solution filter; working directory; invocation/targets; configuration;
-TFMs/RIDs; SDK and MSBuild versions; host OS; CPU/memory/resource limits; node
-count; environment/global properties; and diagnostic instrumentation.
+## Step 1: Establish a Performance Baseline
 
-Also record restore inclusion, NuGet cache/feed state, prior output state, compiler
-and build-server warm-up, and significant concurrent activity. Do not change SDK,
-node count, restore policy, input scope, and analyzer settings together and then
-attribute the difference to one optimization.
+Measure three scenarios to understand where time is spent. Reuse matching existing
+artifacts first; use [binlog generation](binlog-generation.md) for capture and
+privacy guidance. Discover the repository's actual build entry point and retain
+its configuration, TFM/RID, properties, SDK/toolset, node count, and restore policy
+in the examples below.
 
-If the user supplies logs matching the scenario, analyze them first. If a command
-cannot succeed in this environment, report the command, exit/failure evidence,
-and missing requirement; a failed or partial build is not a timing baseline.
+The binlog filenames below are illustrative. Choose an unused explicit filename
+for every capture; do not overwrite existing evidence.
 
-### Measure three distinct scenarios
+Record those settings, source revision/local changes, machine resources, cache
+state, and exact input edit. Compare successful builds of the same scenario, not
+a failed build, a smaller solution, or differently instrumented runs.
 
-| Scenario | Preparation | Measurement and expected evidence |
-| --- | --- | --- |
-| Cold-output build | Use an authorized disposable workspace or an explicitly scoped clean output set. No prior selected build outputs; record whether packages are already cached. | Ordinary build including restore if end-to-end cost is the question. Compilation and required generation occur; identify restore, evaluation, execution, and I/O contributions. |
-| Warm changed-input build | First produce valid outputs. Make one recorded, reproducible change to a selected source/input. | Ordinary build with that change; record projects/targets affected. Dependent work may be necessary, but unrelated recompilation needs explanation. |
-| Warm no-change / no-op build | Produce a successful build, then invoke the exact same command with no edits, cleanup, or property changes. | Expensive compilation/generation should skip when up to date. Evaluation, reference resolution, restore checks, and orchestration can still legitimately occur. |
+### Cold Build (First Build)
 
-"Warm" alone is ambiguous: label whether an input changed. A timestamp-only
-touch measures timestamp invalidation; a real implementation edit or public-API
-edit can have different downstream effects. Record which one was used and use
-the same edit on both sides of the experiment.
+No previous output exists for the selected build. An end-to-end cold-output
+measurement includes restore, compilation, and all required work.
 
-Do not use `Rebuild`, `-t:Rebuild`, or `--no-incremental` as the second no-change
-build. Those deliberately force full work. A separately labeled forced-rebuild
-benchmark can measure full-work throughput but is neither an ordinary warm build
-nor proof of a cold cache.
-
-### Prepare cold state safely
-
-Discover the actual output and intermediate paths, including imported overrides,
-custom generators, and artifacts layout. Do not recursively search a repository
-for directories named `bin`/`obj` and delete them. Those names do not prove
-ownership, and custom Clean targets can have additional side effects.
-
-Prefer a disposable, agreed workspace. Otherwise enumerate the precise generated
-paths, confirm that nothing user-authored or shared will be removed, obtain
-permission for that scope, and use the repository's supported scoped cleanup.
-If safe cleanup is not possible, leave outputs alone and mark the cold-output
-scenario unmeasured.
-
-Never clear shared NuGet caches, stop other users' compiler/build servers, or try
-to evict OS caches as an implicit part of "cold". Output-cold, package-cold, and
-process/cache-cold are different experiments. Record them instead of pretending
-one cleanup command establishes all three.
-
-### Repeat and retain the evidence
-
-1. Establish the three scenarios before editing configuration. For a narrowly
-   scoped complaint, reuse matching existing measurements and state any scenario
-   not measured rather than fabricating a complete table.
-1. Preserve a binlog and wall-clock duration for each measured run. Match logging
-   overhead on both sides; retain detailed profiler runs separately if they add
-   instrumentation. Resolve log paths through the capture guide.
-1. Prefer at least three measured runs per scenario and report median plus range
-   or another stated spread. Re-establish that scenario before every repeat:
-   output-cold each time, the same warm edit from the same primed state, or an
-   unchanged successful state for no-op. Do not average cold and warmed runs.
-1. Note outliers and environmental interference instead of silently discarding
-   unfavorable results. Define the relevant improvement goal and noise tolerance
-   before selecting a winner.
-1. Make one evidence-driven change. Repeat the same scenario, input change,
-   success checks, and instrumentation. Keep a rollback scoped to your own change.
-
-An illustrative invocation after discovering the real solution and safe node
-budget is:
+Use an agreed disposable workspace or explicitly authorized cleanup of known
+generated paths. Inspect custom Clean behavior and shared outputs first. Do not
+recursively delete every directory named `bin` or `obj`, clear shared NuGet caches,
+or stop shared build servers. If safe preparation is unavailable, report the cold
+scenario as unmeasured.
 
 ```powershell
-dotnet build .\Repo.sln -c Debug -m:4 "-bl:before-noop-01.binlog"
+# After preparing the agreed cold-output state
+dotnet build -m "-bl:cold-build.binlog"
 ```
 
-The label is truthful only if the preparation matches it. `--no-restore` may be
-added for a build-only experiment after a successful matching restore, but it
-must not quietly turn an end-to-end baseline into a different benchmark.
+Record whether packages, compiler servers, and filesystem caches are already
+warm. Removing build outputs does not make those caches cold.
 
-### Baseline ledger and interpretation
+### Warm Build (Incremental Build)
 
-| Scenario / fixed input change | Before median [range] | After median [range] | Delta | Artifacts / correctness |
-| --- | --- | --- | --- | --- |
-| Cold-output, restore included/excluded | Measured value or not measured | Measured value or not measured | Seconds and percent | Logs, result, output completeness |
-| Warm, named edit | Measured value or not measured | Measured value or not measured | Seconds and percent | Logs, invalidated projects/targets |
-| No-change, same invocation | Measured value or not measured | Measured value or not measured | Seconds and percent | Logs, executed/skipped work |
+Build output exists and some files have changed. This measures how well
+incremental building handles a specific change.
 
-Compute percentage improvement as `(before - after) / before * 100` using the
-same statistic; a negative value is a regression. Keep restore time, evaluation
-time, critical-path work, and task totals distinguishable. Parallel/nested task
-totals are not additive wall time.
+```powershell
+dotnet build -m
+if ($LASTEXITCODE -ne 0) { throw "Initial build failed; no valid warm baseline." }
 
-Historical triage hints include no-op builds under about 5 seconds for small
-repositories or 30 seconds for large ones, and full builds under roughly
-10 seconds / 60 seconds / 5 minutes for small / medium / large workloads.
-Neither project-size labels nor these times are universal budgets. A no-op over
-30 seconds, or roughly 10 seconds per project, warrants investigation, not an
-automatic conclusion that incrementality is broken.
+# Make one recorded, reversible source/input change, then build normally
+dotnet build -m "-bl:warm-build.binlog"
+```
 
-A warm build recompiling broadly can reflect dependency/API changes or broken
-tracking; a slow cold restore can reflect network/feed work as well as cache
-state. Measure the cause. If all scenarios meet the actual goal with correct
-behavior, stop: no optimization is required.
+A timestamp-only touch, implementation edit, and public-API edit can propagate
+differently. Use the same kind of change before and after an optimization.
 
-Return to [bottleneck classification](troubleshoot-performance.md#2-classify-the-bottleneck)
-before selecting one of the experiments below.
+### No-Op Build (Nothing Changed)
 
-## Artifacts output layout
+Build output exists and nothing has changed. Expensive work whose inputs and
+outputs are up to date should skip. A slow no-op can still be caused by
+evaluation, restore checks, reference resolution, or orchestration rather than
+broken compilation incrementality.
 
-Use this branch for measured output collisions, copy/layout overhead, or a
-deliberate CI output-management need. **.NET SDK 8+** supports centralized
-artifacts layout; changing the target framework alone does not enable it.
+```powershell
+dotnet build -m
+if ($LASTEXITCODE -ne 0) { throw "Initial build failed; no valid no-op baseline." }
+
+dotnet build -m "-bl:noop-build.binlog"
+```
+
+Label this **warm no-change** scenario separately from a warm changed-input build.
+Do not use `Rebuild`, `-t:Rebuild`, or `--no-incremental` for the second build:
+forced full work is a separate benchmark, not a no-op or proof of cold caches.
+
+### What Good Looks Like
+
+| Scenario | Expected behavior |
+| --- | --- |
+| Cold build | Complete required outputs, including compilation and required generation. This is the full-work baseline for the recorded cache state. |
+| Warm build | Changed inputs and affected dependencies invalidate the appropriate work; unrelated recompilation needs explanation. |
+| No-op build | Up-to-date expensive compilation/generation skips. Under roughly 5 seconds for small repositories or 30 seconds for large ones can be useful triage hints, not universal budgets. |
+
+**Red flags to investigate, not automatic diagnoses:**
+- No-op build over 30 seconds: distinguish evaluation, restore, copying, and
+  unexpected execution before applying [incremental fixes](incremental-build.md).
+- Warm build recompiles everything: inspect the input/API change and dependency
+  chain; do not assume every downstream rebuild is unnecessary.
+- Long cold restore: investigate feed/network work and cache state, not just
+  package-cache problems.
+
+### Recording Baselines
+
+Prefer repeated measurements, such as three runs per scenario, and report their
+median and spread. Re-establish the correct cold or warm state before each run.
+Do not mix cold and warmed timings or silently discard inconvenient outliers.
+
+| Scenario | Before median [range] | After median [range] | Improvement |
+| --- | --- | --- | --- |
+| Cold build, restore included/excluded | Not measured | Not measured | Seconds and percent |
+| Warm build, named input edit | Not measured | Not measured | Seconds and percent |
+| No-op build, unchanged command | Not measured | Not measured | Seconds and percent |
+
+Fill this table with actual results and artifact paths. Percentage improvement is
+`(before - after) / before * 100`; a negative result is a regression. Change one
+variable at a time and retain the same success/output checks. Use distinct log
+names for each run and for before/after results so baseline evidence is not
+overwritten.
+
+## Step 2: Artifacts Output Layout
+
+`UseArtifactsOutput`, introduced in **.NET SDK 8**, centralizes output layout.
+It can address output-management and collision problems and simplify CI caching;
+it does not itself make compilation faster or validate a cache.
+
+### Enabling Artifacts Output
 
 ```xml
 <!-- Directory.Build.props -->
-<Project>
-  <PropertyGroup>
-    <UseArtifactsOutput>true</UseArtifactsOutput>
-    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
-  </PropertyGroup>
-</Project>
+<PropertyGroup>
+  <UseArtifactsOutput>true</UseArtifactsOutput>
+</PropertyGroup>
 ```
 
-`ArtifactsPath` customizes the root; it is optional when the SDK-selected root is
-appropriate. The CLI's `--artifacts-path` is another SDK 8+ option. Keep restore,
-build, test, and publish invocations consistent rather than changing only one.
+### Before vs After
 
-Traditional outputs live near each project in `bin` and `obj`. Artifacts layout
-groups them below the common root, for example `artifacts\bin\<project>\<pivot>`
-and `artifacts\obj\<project>\<pivot>`. Pivots distinguish configuration and, where
-needed, TFM/RID; inspect the evaluated paths rather than assuming one fixed naming
-pattern. Check projects with duplicate names and custom path/pivot overrides for
-collisions.
+Illustrative single-target layout:
 
-This can simplify output discovery, CI cache handling, and ignore rules. It does
-not by itself make compilation faster or make a cache valid. Preserve scripts,
-test discovery, packaging/publish locations, generated-file ownership, and Clean
-behavior. Update directly affected path consumers and ignore rules; compare
-complete outputs across the supported build matrix. Do not combine a layout
-migration with unrelated tuning. Cross-cutting migrations use
-[modernize](modernize.md) with these compatibility requirements.
+```text
+# Traditional layout
+src\
+  MyLib\
+    bin\Debug\net8.0\MyLib.dll
+    obj\Debug\net8.0\...
+  MyApp\
+    bin\Debug\net8.0\MyApp.dll
 
-## Determinism and cache validity
+# Artifacts layout
+artifacts\
+  bin\MyLib\debug\MyLib.dll
+  bin\MyApp\debug\MyApp.dll
+  obj\MyLib\debug\...
+  obj\MyApp\debug\...
+```
 
-Use this branch when output reuse/reproducibility is the actual measured need,
-not as a substitute for incremental input/output tracking.
+### Benefits
+
+- **Separated outputs:** project/configuration pivots reduce accidental overlap;
+  check duplicate project names and custom path/pivot overrides.
+- **Easier cache management:** a common artifacts root is easier to collect,
+  but cache keys must still cover the relevant inputs, options, SDK, and platform.
+- **Simpler ignore rules:** the generated artifacts root can be ignored centrally.
+- **Multi-targeting:** SDK pivots distinguish TFMs/RIDs where needed; inspect the
+  evaluated paths instead of assuming one fixed subdirectory pattern.
+
+### Customizing
 
 ```xml
 <PropertyGroup>
+  <ArtifactsPath>$(MSBuildThisFileDirectory)output</ArtifactsPath>
+</PropertyGroup>
+```
+
+The CLI's `--artifacts-path` also requires SDK 8+. Keep restore, build, test,
+pack/publish, scripts, and cleanup consistent with the new locations. Verify the
+supported configuration/TFM/RID matrix and file ownership before adopting the
+layout. A target framework change alone does not enable this SDK feature.
+
+## Step 3: Deterministic Builds
+
+Deterministic compilation produces identical compiler outputs for identical
+compiler inputs. This supports caching and reproducibility, but does not make
+every custom build step or package reproducible automatically.
+
+### Enabling Deterministic Builds
+
+```xml
+<!-- Directory.Build.props -->
+<PropertyGroup>
+  <!-- Already enabled by default in modern .NET SDK projects -->
   <Deterministic>true</Deterministic>
   <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 </PropertyGroup>
 ```
 
-Deterministic compilation is already the default in modern SDK projects. It
-produces consistent compiler outputs for identical compiler inputs; it is not a
-promise that every build target, generator, PDB path, signing step, or package is
-reproducible. `ContinuousIntegrationBuild` supports SDK CI normalization, but the
-repository must supply a real CI condition and compatible source/path information.
+Use the repository's actual CI signal; not every runner supplies `CI=true`.
 
-Check stable generated content and paths, compiler/SDK/package versions, build
-options, and all relevant inputs before sharing cached results across machines.
-Compare the required artifacts for reproducibility; do not assume setting two
-properties creates a cache. NuGet lock files stabilize dependency resolution,
-not compilation results. Determinism and a centralized `artifacts` directory do
-not justify reusing stale outputs after an untracked input changes.
+### What Deterministic Affects
 
-## Dependency graph and reference semantics
+- Removes time-dependent variation from compiler output; it does not simply zero
+  every PE timestamp field.
+- Makes compiler outputs repeatable for the same complete inputs.
+- Works with source/path normalization for reproducible PDBs; deterministic
+  compilation alone does not normalize arbitrary machine-specific paths.
 
-Use the actual project graph, per-instance timings, and critical path. Identify
-the exact candidate edge and why it is unnecessary. A direct reference can be
-transitively reachable yet intentionally describe direct API use or carry
-important metadata; do not delete it based only on reachability.
+### Why It Matters for Performance
 
-| Candidate | What it changes | Required proof |
-| --- | --- | --- |
-| Remove a redundant direct `ProjectReference` | May reduce redundant resolution/graph work | Transitive availability and all reference metadata remain equivalent for supported SDK/TFM/RID/configurations, build, runtime, and pack/publish. |
-| `ReferenceOutputAssembly="false"` | Keeps a build-order dependency without adding that output assembly as a compiler reference | The consumer does not need that assembly API. The project still builds first: this does **not** remove the scheduling edge. |
-| `PrivateAssets="all"` | Controls dependency asset exposure, notably to package consumers | Inspect restore/pack and consuming-project behavior. It is not a generic "do not build this project" or "remove its compiler reference" switch. |
-| `DisableTransitiveProjectReferences=true` | Opts out of implicit transitive project references in supporting SDK builds | Last resort for measured closure overhead. Explicitly declare every consumed dependency and verify all consumers; it does not flatten required build ordering. |
-| Prebuilt package instead of project dependency | Changes the source/build/deployment boundary | An agreed versioning and rebuild policy; never silently use stale binaries to shorten a benchmark. |
+- **Build caching:** deterministic outputs can be reused when the complete cache
+  key and required artifacts are correct.
+- **CI optimization:** correct input tracking can avoid rebuilding unchanged work.
+- **Distributed builds:** cross-machine reuse also requires compatible toolsets,
+  paths, options, dependencies, and generated content.
 
-For a genuinely build-order-only code generator, the scoped intent can be:
+Verify reproducibility of the required artifacts. Neither these properties nor
+NuGet lock files create a compiled-output cache or excuse untracked inputs.
+
+## Step 4: Dependency Graph Trimming
+
+Removing genuinely unnecessary references can reduce graph/resolution work and,
+when it removes a critical dependency, shorten the critical path.
+
+### Audit the Dependency Graph
+
+Inspect existing binlogs for project references, global-property variants, build
+times, and waits. If a new capture is needed:
+
+```powershell
+dotnet build "-bl:graph.binlog"
+```
+
+Use [local replay](binlog-failure-analysis.md#replay-a-binary-log) and
+[performance diagnostics](build-perf-diagnostics.md) to follow the actual work.
+Inclusive `ResolveProjectReferences` time includes waiting for dependencies; it
+is not all reference-resolution CPU work.
+
+### Techniques
+
+#### Remove Redundant Transitive References
+
+```xml
+<!-- Before: Core also references Utils -->
+<ItemGroup>
+  <ProjectReference Include="..\Core\Core.csproj" />
+  <ProjectReference Include="..\Utils\Utils.csproj" />
+</ItemGroup>
+
+<!-- Candidate only after proving the direct Utils edge is unnecessary -->
+<ItemGroup>
+  <ProjectReference Include="..\Core\Core.csproj" />
+</ItemGroup>
+```
+
+Transitive reachability alone is insufficient. A direct reference may express
+direct API use, repository policy, or important metadata. Verify compile/runtime
+dependencies and pack/publish behavior across supported TFMs/configurations.
+Removing `App -> Utils` does not necessarily shorten `App -> Core -> Utils`.
+
+#### Build-Order-Only References
+
+When a project must build first but its assembly is not a compiler reference:
 
 ```xml
 <ProjectReference Include="..\CodeGen\CodeGen.csproj"
                   ReferenceOutputAssembly="false" />
 ```
 
-For `App -> Core -> Utils`, removing an additional `App -> Utils` reference does
-not necessarily shorten that serial chain. It can be correct only if `App` keeps
-all intended compile/runtime/pack behavior and metadata. If `App` directly uses
-`Utils`, a deliberate direct reference may be clearer or required by repository
-policy even when the current SDK supplies transitive compile references.
+This preserves the build-order dependency. It does **not** remove the scheduling
+edge or make the projects independent.
 
-Identify deep chains versus many small independent projects. Splitting a measured
-large bottleneck can expose parallel work; merging tiny leaves can reduce
-per-project evaluation overhead. Those are opposing remedies for different
-evidence, not simultaneous recommendations. Moving common code to a base library
-still creates a dependency and can lengthen the critical path. Seek an agreed
-architecture change and measure the resulting graph before claiming a gain.
+#### Prevent Transitive Asset Flow
 
-## Graph and parallelism
+When a dependency is an implementation detail that should not be exposed through
+the relevant NuGet asset/pack contract:
 
-Name the critical chain, for example `Core -> Api -> Web -> Tests`, with durations
-and dependency/wait evidence. More nodes cannot parallelize a required serial
-chain. A summed Target Performance Summary alone cannot reveal node utilization;
-use recorded project-instance and node-scheduling evidence exposed by replay.
-If that detail is absent, state the gap instead of estimating utilization or a
-critical path from aggregate timings.
+```xml
+<ProjectReference Include="..\InternalHelpers\InternalHelpers.csproj"
+                  PrivateAssets="all" />
+```
 
-### Controlled node-count experiment
+Inspect restored assets, generated package dependencies, and consuming projects.
+`PrivateAssets` is not a generic "do not build" or "remove the compiler reference"
+switch, and this metadata alone does not establish a performance improvement.
 
-Raw MSBuild defaults to one node without `-m`; `-m` without a number permits up to
-the logical processor count, and `-m:N` gives an explicit limit. The `dotnet build`
-driver can supply MSBuild switches itself, so inspect the invocation rather than
-assuming every host has the same default. Keep a fixed, recorded node count in
-baseline comparisons.
+#### Disable Transitive Project References
 
-Compare an appropriate explicit node budget, respecting CI quotas, memory,
-other users, and I/O contention. `-m:4` is an example, not a universal optimum.
-Do not change node count silently when collecting the "after" result.
+For deliberately explicit-only dependency management in supporting SDK builds:
 
-For custom orchestration, the `MSBuild` task must allow parallel project requests,
-and the process must have more than one available node:
+```xml
+<PropertyGroup>
+  <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+</PropertyGroup>
+```
+
+**Caution:** this requires explicit references to consumed dependencies. Consider
+it only for measured transitive-closure overhead, with consumer validation. It
+does not eliminate required project build ordering.
+
+## Step 5: Static Graph Builds (`/graph`)
+
+Static graph mode constructs the project graph before building, allowing
+scheduling from the declared dependencies.
+
+### Enabling Graph Build
+
+```powershell
+dotnet build -graph
+dotnet build -graph "-bl:graph-build.binlog"
+```
+
+### Benefits
+
+- **Scheduling:** knowing the complete graph can improve parallel scheduling.
+- **Isolation:** project isolation is a separate contract, selected with
+  `-isolateProjects`; `/graph` alone does not guarantee it.
+- **Caching potential:** results-cache options are separate features with their
+  own isolation/correctness requirements, not an automatic graph-build cache.
+
+### When to Use
+
+| Scenario | Recommendation |
+| --- | --- |
+| Large multi-project solution, for example 20+ projects | Measure graph mode as a candidate; project count is not proof of a benefit. |
+| Small solution, for example fewer than 5 projects | Extra graph construction may outweigh scheduling gains; measure rather than assume. |
+| CI builds | Try when dependencies are statically discoverable and output isolation is sound. |
+| Local development | Compare both modes in the same cold, changed-input, or no-change scenario. |
+
+### Troubleshooting Graph Build
+
+All relevant project dependencies must be statically discoverable. References
+created inside targets or hidden in programmatic `MSBuild` calls can violate
+that model. Inspect the actual emitted error rather than assuming one error code.
+
+Declare `ProjectReference` items during evaluation where that preserves their
+semantics. Do not move execution-dependent logic blindly, drop dependencies, or
+disable dependency builds to make graph construction pass. If the graph cannot
+represent the build correctly, retain the normal build.
+
+## Step 6: Parallel Build Tuning
+
+### MaxCpuCount
+
+```powershell
+# Permit up to the logical processor count
+dotnet build -m
+
+# Explicit budget, useful on shared CI agents
+dotnet build -m:4
+
+# MSBuild.exe syntax
+msbuild -m:8 .\MySolution.sln
+```
+
+Raw MSBuild defaults to one node without `-m`; the `dotnet build` driver can
+supply switches itself. Inspect the actual invocation and record an explicit
+budget when comparing runs. Respect memory limits, CPU quotas, and other users.
+
+### Identifying Parallelism Bottlenecks
+
+In recorded project-instance and scheduling evidence, look for:
+- **Long sequential chains:** projects waiting on required predecessors.
+- **Uneven load:** idle nodes while others remain busy.
+- **Single-project bottleneck:** one long project on the critical path.
+
+Name the chain with durations, for example `Core -> Api -> Web -> Tests`.
+Aggregate target/task summaries alone cannot establish node utilization: totals
+can overlap, nest, or include waits. If replay lacks sufficient scheduling detail,
+report that gap rather than inventing utilization percentages.
+
+For independent requests in a custom orchestration target, enable parallelism
+on the `MSBuild` task as well as providing multiple nodes:
 
 ```xml
 <MSBuild Projects="@(ProjectsToBuild)" Targets="Build" BuildInParallel="true" />
 ```
 
-Confirm those requests are independent and their outputs isolated. A
-`BuildInParallel` setting cannot repair a false or required dependency edge, and
-more nodes may make a memory- or disk-bound workload worse. A hot task inside one
-project needs task-specific evidence, not another project scheduling flag.
+### Reducing the Critical Path
 
-### Static graph experiment
+1. Split a measured large bottleneck only if the resulting work can run independently.
+2. Remove proven unnecessary references using Step 4's compatibility checks.
+3. Use `ReferenceOutputAssembly="false"` only for genuine build-order-only intent;
+   it can reduce assembly-reference work, not the dependency wait itself.
+4. Consider a shared base library only if the resulting graph is better; a new
+   common prerequisite can also lengthen the serial chain.
 
-Graph build (`-graphBuild`, also `/graph`) constructs the project graph before
-execution and schedules from declared dependencies. It is most worth measuring
-for large multi-project/CI builds; small graphs can pay extra upfront overhead.
-Project count alone, including rules of thumb such as 20 projects, is not proof
-of a benefit.
+More nodes cannot parallelize a required dependency chain and can worsen
+memory- or I/O-bound workloads.
 
-Check installed-tool support and static discoverability of the complete
-`ProjectReference` graph. Execution-time reference discovery and hidden
-programmatic `MSBuild` calls can violate the graph model. Do not merely move them
-outside a target if their semantics depend on execution-time state.
+## Step 7: Additional Quick Wins
 
-After a matching restore, a build-only candidate might be:
+Treat these as candidates selected by evidence, not a list to apply wholesale.
+
+### Separate Restore from Build
 
 ```powershell
-dotnet build .\Repo.sln -c Debug --no-restore -m:4 -graphBuild "-bl:graph-candidate.binlog"
+dotnet restore
+if ($LASTEXITCODE -ne 0) { throw "Restore failed; do not use stale assets." }
+dotnet build --no-restore -m
+if ($LASTEXITCODE -ne 0) { throw "Build failed; do not test stale outputs." }
+dotnet test --no-build
 ```
 
-Compare against the same invocation without `-graphBuild`. Verify the same
-project instances, outputs, diagnostics, and incremental propagation. Graph mode
-can improve scheduling; it neither guarantees fewer evaluations nor automatically
-enables project isolation/results caching. `-isolateProjects` and results-cache
-options are separate contracts, not free benefits of `/graph`.
+Use matching configuration/TFM/RID and restore-affecting properties in each stage.
+`--no-restore` requires current assets; `--no-build` requires successfully built
+matching test outputs. Keep restore-inclusive and build-only timings separate.
 
-If graph construction fails or dependencies cannot be represented statically,
-stop this experiment and retain the normal build. Report the actual failure
-rather than assuming a particular error code. Do not mask it by dropping
-references or disabling dependency builds.
+### Skip Unnecessary Targets
 
-## Restore isolation
-
-Use this branch when restore contributes measurable cost. Preserve a
-restore-inclusive baseline even if CI or the development loop benefits from a
-separate build-only stage.
+For an explicitly agreed development scenario where these outputs/checks are
+optional:
 
 ```powershell
-dotnet restore .\Repo.sln
-if ($LASTEXITCODE -ne 0) { throw "Restore failed; do not measure a build with stale assets." }
-dotnet build .\Repo.sln -c Debug --no-restore -m:4
+dotnet build -p:GenerateDocumentationFile=false
+dotnet build -p:RunAnalyzers=false
 ```
 
-These are separate steps: run the second only after the first succeeds. Supply
-the actual matching configuration, TFM/RID, package, and other restore-affecting
-properties to both stages. `--no-restore` is unsafe with missing/stale assets or
-after dependency/restore-input changes.
+Measure their actual cost first. Preserve required XML documentation in packages,
+required analyzer diagnostics in CI, and generator-produced code.
+[Analyzer diagnostics](build-perf-diagnostics.md#2-roslyn-analyzers-and-source-generators)
+covers conditional policy and global analyzer references. Do not silently call
+disabled validation behavior-preserving.
 
-For a measured large restore graph,
-`<RestoreUseStaticGraphEvaluation>true</RestoreUseStaticGraphEvaluation>` is a
-separate experiment from graph **build**. Verify toolset support, resolved assets,
-feed/cache behavior, and restore diagnostics before comparing speed. Investigate
-expensive feed/network or cache misses rather than purging shared caches.
+### Use Project-Level Filtering
 
-`dotnet test --no-build` is appropriate only for tests whose matching outputs and
-dependencies were successfully built. Keep configuration/TFM/RID consistent;
-otherwise it can exercise stale or absent binaries. It is not a validation
-shortcut after a failed build.
-
-## Scoped inner-loop work
-
-Use these controls only for measured work the development scenario does not
-require, with an agreed policy. Preserve the CI, packaging, runtime, and diagnostic
-contracts separately.
-
-| Control | Decision and verification |
-| --- | --- |
-| `RunAnalyzers=false` for a controlled dev scenario | First measure analyzer cost, including global/package-provided analyzers. Preserve required CI enforcement; do not remove generator-produced code or treat disabled diagnostics as unchanged behavior. |
-| `EnforceCodeStyleInBuild` conditional on the real CI signal | Check effective values in both environments and verify the CI pipeline actually sets that signal. Do not assume every runner sets `ContinuousIntegrationBuild` automatically. |
-| `GenerateDocumentationFile` limited to required scenarios | XML documentation may be a package/output contract. Disable only where intentionally optional, preserve shipping artifacts and warnings policy, and measure the real cost. |
-| `ProduceReferenceAssembly` | Inspect the SDK's existing effective value first. Reference assemblies can avoid downstream recompilation for implementation-only changes; verify public-API changes still invalidate consumers. |
-| Build a project or solution filter instead of the entire solution | Scope the inner loop deliberately, with its project dependencies and required tests. Compare like-sized workloads; selecting less work is a new scenario, not a faster full-solution build. |
-
-For an agreed CI-only code-style policy, an explicit conditional example is:
-
-```xml
-<PropertyGroup>
-  <EnforceCodeStyleInBuild Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</EnforceCodeStyleInBuild>
-  <EnforceCodeStyleInBuild Condition="'$(ContinuousIntegrationBuild)' != 'true'">false</EnforceCodeStyleInBuild>
-</PropertyGroup>
+```powershell
+dotnet build .\src\MyApp\MyApp.csproj
 ```
 
-Place settings where they take effect under the repository's import order and
-confirm evaluated values. Configuration-only conditions such as `Debug` are not
-a safe substitute for a CI policy: CI may also build Debug.
+Build the project and its dependencies when that is the intended inner loop.
+Solution filters can similarly select a supported subset. A smaller selection
+is a different scenario, not proof that the full solution became faster; retain
+the required integration and test coverage.
 
-For excessive I/O, use the performance guide's
-[copy-mode and filesystem branch](troubleshoot-performance.md#copy-and-output-io)
-before enabling hardlinks, shared outputs, or broad skip-copy settings.
+### Binary Log for All Investigations
 
-## Acceptance and stopping conditions
+Start with an existing matching binlog or capture through
+[binlog generation](binlog-generation.md):
 
-Accept a change only after the
-[same-scenario and behavior checks](troubleshoot-performance.md#4-compare-the-same-scenario-and-preserve-behavior)
-show a repeatable benefit for the intended workload and no unintended regression.
-Retain the before/after ledger and supporting artifacts. Explicitly label any
-intentional scope, output, or diagnostics-policy change.
+```powershell
+dotnet build -m "-bl:perf.binlog"
+```
 
-Stop if measurements are missing, the result is within run-to-run noise, the
-candidate cannot build correctly, or it trades correctness for speed. Report
-unmeasured scenarios and blocked checks; never claim success from a smaller,
-failed, or validation-disabled build. Finish using the performance guide's
-[output contract](troubleshoot-performance.md#output-contract).
+Then use [build performance diagnostics](build-perf-diagnostics.md) to identify
+the bottleneck before applying a change.
+
+## Optimization Decision Tree
+
+```text
+Is the no-op build slow?
+  YES -> Classify evaluation, restore, copies, and executed work first.
+         Unexpected execution -> incremental-build.md.
+         Slow evaluation -> eval-performance.md.
+  NO / after classification:
+    Is the cold build slow?
+      Restore -> investigate feeds/cache/inputs; compare restore separately.
+      Compilation -> diagnose analyzers/generators and critical-path work.
+      Other targets -> inspect their recorded reasons and task costs.
+    Is the warm changed-input build slow?
+      Unexpected propagation -> incremental-build.md and dependency analysis.
+      Required serial work -> inspect critical path and parallelism above.
+    Are all scenarios healthy for the actual workload?
+      Stop. Do not change healthy configuration just to apply a tuning flag.
+```
+
+Use the linked [incremental](incremental-build.md),
+[evaluation](eval-performance.md), and [diagnostics](build-perf-diagnostics.md)
+references for those branches.
+
+## Validation and Results
+
+Repeat the same scenario and input change with the same instrumentation. Verify
+required outputs, downstream consumers, diagnostics, and relevant tests or
+pack/publish behavior. For tracking changes, exercise input addition/change/removal
+and missing outputs as described in [incremental builds](incremental-build.md).
+For copy changes, verify [copy-mode semantics](copy-to-output-directory.md).
+
+Report the command/environment, before/after median and spread, artifact paths,
+one causal change, correctness checks, and unmeasured scenarios. Stop or revert
+only your own experimental change if the benefit is within noise, the comparison
+cannot succeed, or correctness regresses.
