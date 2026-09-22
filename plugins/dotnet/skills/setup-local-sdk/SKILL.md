@@ -8,7 +8,8 @@ description: >
   or other workloads on a preview, updating or replacing an existing local SDK,
   creating reproducible team/CI install scripts, configuring global.json paths.
   DO NOT USE FOR: system-wide SDK installs, .NET hosts older than 10, runtime-only
-  installs, or projects not using SDK-style commands.
+  installs, projects not using SDK-style commands, or build-failure analysis without
+  an SDK installation request (use msbuild).
 ---
 
 # setup-local-sdk

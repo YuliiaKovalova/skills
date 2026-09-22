@@ -1,0 +1,9 @@
+<Project>
+  <Import Project="$(CustomBeforeExampleTargets)"
+          Condition="'$(CustomBeforeExampleTargets)' != '' and Exists('$(CustomBeforeExampleTargets)')" />
+  <Target Name="Build">
+    <Error Condition="'$(HookTrace)' != 'first;second;'"
+           Code="HOOK1001" Text="Both hooks must run in the original order." />
+    <Message Importance="High" Text="HOOKS=$(HookTrace)" />
+  </Target>
+</Project>

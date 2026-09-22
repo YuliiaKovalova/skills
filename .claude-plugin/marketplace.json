@@ -7,7 +7,20 @@
     {
       "name": "dotnet",
       "source": "./plugins/dotnet",
-      "description": "C# language server (LSP) integration for coding agents and high-level .NET development skills."
+      "description": "High-level .NET development and MSBuild troubleshooting skills, with C# LSP and binary-log MCP integration.",
+      "mcpServers": {
+        "binlog": {
+          "type": "stdio",
+          "command": "dotnet",
+          "args": [
+            "dnx",
+            "Microsoft.AITools.BinlogMcp",
+            "--yes",
+            "--prerelease"
+          ],
+          "tools": ["*"]
+        }
+      }
     },
     { 
       "name": "dotnet-advanced",

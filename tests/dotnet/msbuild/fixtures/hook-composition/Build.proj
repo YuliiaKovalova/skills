@@ -1,0 +1,7 @@
+<Project DefaultTargets="Build">
+  <PropertyGroup>
+    <CustomBeforeExampleTargets>First.targets</CustomBeforeExampleTargets>
+    <CustomBeforeExampleTargets>Second.targets</CustomBeforeExampleTargets>
+  </PropertyGroup>
+  <Import Project="Host.targets" />
+</Project>
