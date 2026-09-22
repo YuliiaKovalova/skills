@@ -40,19 +40,17 @@ an unmeasured hypothesis; do not invent timings or claim an improvement.
 
 ## 2. Classify the bottleneck
 
-Retrieve build wall time, evaluation durations and project-instance/global-property
-identity, expensive projects/targets/tasks, execution or skip reasons, and the
-node/dependency timeline. Use available binlog MCP capabilities with their actual
-discovered schemas; do not assume tool signatures or install a second analysis
-stack just to repeat the same evidence.
+Replay the existing artifact with MSBuild using the shared
+[binary-log replay instructions](binlog-generation.md#replay-an-existing-log).
+Read the emitted diagnostic text for recorded build time, evaluation durations,
+project-instance/global-property identity, expensive projects/targets/tasks, and
+execution or skip reasons. Use dependency and node-scheduling events where the log
+exposes them. Do not time replay and report it as the original build's duration.
 
-When MCP is unavailable, replay the existing artifact once into a local diagnostic
-log. This reads the recorded build; it does not run it again. Quote the logger
-argument, especially in PowerShell:
-
-```powershell
-dotnet msbuild .\before-noop.binlog -noconlog -fl "-flp:v=diag;logfile=before-noop.diag.log;performancesummary"
-```
+If the text output lacks required evaluation, analyzer, or scheduling detail,
+report that gap rather than inferring it from aggregate timings. When the original
+build is available, collect the specific missing MSBuild diagnostics in a separately
+labeled run; otherwise keep the conclusion bounded by the existing artifact.
 
 Use the Project, Target, and Task Performance Summaries to find candidates, then
 inspect their individual events. Summed durations can exceed elapsed time because

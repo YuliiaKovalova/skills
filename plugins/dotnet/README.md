@@ -5,15 +5,14 @@ Core .NET and C# skills for coding agents.
 ## Includes
 
 - Common .NET development skills
-- A task-routed MSBuild troubleshooting skill and binary-log MCP tools
+- A task-routed MSBuild troubleshooting skill using MSBuild binary-log replay
 - A C# language server integration for `.cs` files
 
 ## LSP
 
 This plugin declares a C# LSP server that is launched through the .NET CLI.
 The LSP declaration is available to hosts that support the plugin `lspServers` extension. Codex
-plugin installs expose this plugin's skills and binary-log MCP server but do not load that
-host-specific LSP declaration.
+plugin installs expose this plugin's skills but do not load that host-specific LSP declaration.
 
 Prerequisites:
 - .NET 10 SDK installed
@@ -38,7 +37,7 @@ skills/msbuild/
     troubleshoot-issues.md         # Failure diagnosis and incorrect build behavior
     troubleshoot-performance.md    # Measure, classify, change, compare
     modernize.md                   # Preserve contracts while updating build files
-    binlog-generation.md           # Shared, on-demand artifact capture
+    binlog-generation.md           # Shared capture and MSBuild replay
     antipatterns.md                # Shared correctness and cleanup decisions
     extension-points.md            # Imports, hooks, and package layout
     build-perf-baseline.md         # Detailed baseline/optimization protocol
@@ -55,8 +54,8 @@ reorganizes its decision-making into task workflows rather than concatenating sk
 
 | Source skill | Consolidated destination | Structural decision |
 | --- | --- | --- |
-| [binlog-failure-analysis](../dotnet-msbuild/skills/binlog-failure-analysis/SKILL.md) | [Troubleshoot issues](skills/msbuild/references/troubleshoot-issues.md) | Artifact-first diagnosis, causal versus cascading failures, embedded-source limits, and replay fallback. |
-| [binlog-generation](../dotnet-msbuild/skills/binlog-generation/SKILL.md) | [Shared capture](skills/msbuild/references/binlog-generation.md) | Simplified to preserve the original command, capture only when needed, verify the artifact, and protect sensitive data. |
+| [binlog-failure-analysis](../dotnet-msbuild/skills/binlog-failure-analysis/SKILL.md) | [Troubleshoot issues](skills/msbuild/references/troubleshoot-issues.md) | Artifact-first diagnosis through MSBuild replay, causal versus cascading failures, and explicit limits on source/evaluation data. |
+| [binlog-generation](../dotnet-msbuild/skills/binlog-generation/SKILL.md) | [Shared capture and replay](skills/msbuild/references/binlog-generation.md) | Preserve the original command, capture only when needed, replay existing logs without rebuilding, and protect diagnostic artifacts. |
 | [build-perf-baseline](../dotnet-msbuild/skills/build-perf-baseline/SKILL.md) | [Baseline detail](skills/msbuild/references/build-perf-baseline.md) | Preserve measurement rigor and optimization domains behind the performance route; further simplification is deferred. |
 | [build-perf-diagnostics](../dotnet-msbuild/skills/build-perf-diagnostics/SKILL.md) | [Performance diagnosis](skills/msbuild/references/troubleshoot-performance.md#2-classify-the-bottleneck) | Choose a bottleneck from evidence instead of applying a universal tuning checklist. |
 | [copy-to-output-directory](../dotnet-msbuild/skills/copy-to-output-directory/SKILL.md) | [Copy and output I/O](skills/msbuild/references/troubleshoot-performance.md#copy-and-output-io) | Keep version gates and destination-mutation semantics; copying less must not leave stale output. |
@@ -83,11 +82,12 @@ who need those individual specialist entry points can continue using that plugin
 `dotnet/msbuild` entry is self-contained and does not require it to be installed. This is an
 additive consolidation, not a removal or rename of existing skill commands.
 
-The `dotnet` plugin declares the same `Microsoft.AITools.BinlogMcp` server in its root, Claude,
-and Codex manifests. Starting it requires the .NET 10+ `dnx` command and package availability.
-Codex receives the compatible server declaration without Copilot/Claude-only tool allow-list
-fields or LSP declarations. If MCP is unavailable, failure analysis can replay a binary log with
-MSBuild; any reduced diagnostic coverage must be reported.
+Binary-log analysis uses `dotnet msbuild <log.binlog>` with diagnostic file loggers, or a compatible
+`MSBuild.exe` installation. The shared [replay instructions](skills/msbuild/references/binlog-generation.md#replay-an-existing-log)
+serve both failure and performance investigations; no analysis server or extra package is
+required. Replay does not rebuild the original project, and its duration is not the recorded
+build's elapsed time. Missing source, evaluation, or scheduling details must be reported rather
+than inferred from incomplete text logs.
 
 ### Evaluation coverage
 

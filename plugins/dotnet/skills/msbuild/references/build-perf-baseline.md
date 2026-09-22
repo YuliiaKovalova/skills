@@ -7,8 +7,8 @@ baseline workflow; output-layout, reproducibility, dependency, graph, parallelis
 and inner-loop controls are optional branches, not a blanket optimization recipe.
 
 For file-reading tools, resolve sibling references under the skill root's
-`references` directory. Use [binlog generation](binlog-generation.md) for capture
-details, existing-artifact reuse, and privacy handling.
+`references` directory. Use [binary-log capture and replay](binlog-generation.md)
+for capture details, MSBuild replay of existing artifacts, and privacy handling.
 
 ## Measurement protocol
 
@@ -221,7 +221,9 @@ architecture change and measure the resulting graph before claiming a gain.
 Name the critical chain, for example `Core -> Api -> Web -> Tests`, with durations
 and dependency/wait evidence. More nodes cannot parallelize a required serial
 chain. A summed Target Performance Summary alone cannot reveal node utilization;
-use the timeline, project instances, and node scheduling evidence.
+use recorded project-instance and node-scheduling evidence exposed by replay.
+If that detail is absent, state the gap instead of estimating utilization or a
+critical path from aggregate timings.
 
 ### Controlled node-count experiment
 

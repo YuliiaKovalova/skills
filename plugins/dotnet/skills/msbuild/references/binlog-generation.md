@@ -1,8 +1,40 @@
-# Capture a binary log
+# Capture and replay binary logs
 
 Capture is a shared prerequisite **when needed**, not a separate mandatory workflow for every
 build command. If the supplied log already records the relevant failure or performance scenario,
-analyze it first. Do not rerun a build just to rename its log.
+replay it first. Do not rerun a build just to rename its log.
+
+## Replay an existing log
+
+Use MSBuild's binary-log replay to write **new** local text logs. It reads the recorded events
+without rebuilding the original project, so the original checkout does not need to be available:
+
+```powershell
+dotnet msbuild build.binlog -noconlog -fl "-flp:logfile=build-01.diag.log;verbosity=diagnostic;PerformanceSummary" -fl1 "-flp1:logfile=build-01.errors.log;errorsonly" -fl2 "-flp2:logfile=build-01.warnings.log;warningsonly"
+```
+
+Substitute the supplied `.binlog` path and choose unused output filenames before running the
+command. Quote each complete semicolon-delimited logger argument, especially in PowerShell.
+A compatible `MSBuild.exe` can replace `dotnet msbuild`; no additional analysis package is needed.
+
+Confirm replay completed and produced a nonempty diagnostic log. An errors-only or warnings-only
+log can legitimately be empty. Read/search the **text** logs, never the binary file. For example:
+
+```powershell
+Get-Content .\build-01.errors.log
+Select-String -Path .\build-01.diag.log -Pattern 'Performance Summary', 'Skipping target', 'FAILED'
+```
+
+Start failure diagnosis with the recorded errors, then inspect related project/target/task
+events and values in the diagnostic log. Start performance diagnosis with the Project, Target,
+and Task Performance Summaries, then inspect the underlying events and skip reasons.
+
+Replay success does not mean the original build succeeded, and **replay duration is not build
+duration**. Use the recorded build result/timings and original measurements. Replay cannot
+manufacture events that were not captured or guarantee extraction of embedded project/import
+source. If a compatible installed MSBuild cannot read the log, or required source, evaluation,
+or scheduling data is absent from the text output, state the limitation and the missing evidence.
+Do not invent values, silently switch to binary-file text parsing, or rebuild a missing checkout.
 
 ## Preserve the operation
 
@@ -45,13 +77,14 @@ An intentional failing build can still produce a useful log. Failure before MSBu
 condition; do not invent a path or repeatedly rebuild without addressing it.
 
 Keep the path, original exit code, and scenario together. For a capture-only request, this is the
-deliverable. For an investigation, return to the selected task reference.
+deliverable. For an investigation, replay the new artifact and return to the selected task reference.
 
 ## Privacy and retention
 
 Binary logs can contain command lines, environment/property values, credentials, paths, and
-embedded project/import contents. Keep them local by default and out of commits. Preserve existing
-logs during any approved cleanup; do not use a repository-wide clean to prepare capture.
+embedded project/import contents. Replayed text logs can expose the same sensitive values.
+Keep both local by default and out of commits. Preserve existing logs during any approved cleanup;
+do not use a repository-wide clean to prepare capture.
 
 If embedding imported files is inappropriate, use a quoted logger argument such as:
 

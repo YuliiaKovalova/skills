@@ -36,8 +36,9 @@ A failing test assertion after a successful build is a test problem, not an MSBu
 
 The task references route to shared detail when evidence calls for it:
 
-- [Binlog generation](references/binlog-generation.md): capture only when evidence is missing or a
-  new comparison is necessary. It is not a prerequisite for a static review or an advisory answer.
+- [Binary-log capture and replay](references/binlog-generation.md): replay existing logs with
+  MSBuild; capture only when evidence is missing or a new comparison is necessary. Neither is a
+  prerequisite for a static review or an advisory answer.
 - [Anti-patterns](references/antipatterns.md): correctness and cleanup decisions, including the
   exceptions that prevent destructive "fixes."
 - [Extension points](references/extension-points.md): import order, hooks, shared files, and NuGet
@@ -50,9 +51,10 @@ have followed it.
 
 ## 3. Investigate, change, and verify within scope
 
-1. Reuse the available source and artifacts. Query binary logs through the bundled `binlog` MCP
-   server when available; use the documented replay fallback otherwise. Never treat a `.binlog`
-   as a text file.
+1. Reuse the available source and artifacts. Follow the shared
+   [MSBuild replay workflow](references/binlog-generation.md#replay-an-existing-log) and inspect
+   the emitted text logs. Never treat a `.binlog` as a text file or rerun an unavailable build
+   just to analyze its recorded events.
 2. Form a specific explanation supported by the failing project/target/task, evaluated properties
    or items, timestamps, or comparable timings. Distinguish measured facts from hypotheses.
 3. Apply a targeted change only when the user requested changes and the evidence supports it.
@@ -64,8 +66,8 @@ have followed it.
 
 Do not clean the repository, delete caches or outputs, disable analyzers, change SDKs, or turn off
 parallelism as a generic first step. Scope any necessary destructive reset to known generated
-outputs with approval and preserve diagnostic artifacts. Never upload or commit binary logs
-without checking their sensitive contents and the user's permission.
+outputs with approval and preserve diagnostic artifacts. Never upload or commit binary or
+replayed text logs without checking their sensitive contents and the user's permission.
 
 If a missing SDK, unavailable tool, unsupported project type, or absent artifact blocks the next
 step, state the blocker and what can still be concluded. Do not silently replace measured evidence

@@ -7,20 +7,7 @@
     {
       "name": "dotnet",
       "source": "./plugins/dotnet",
-      "description": "High-level .NET development and MSBuild troubleshooting skills, with C# LSP and binary-log MCP integration.",
-      "mcpServers": {
-        "binlog": {
-          "type": "stdio",
-          "command": "dotnet",
-          "args": [
-            "dnx",
-            "Microsoft.AITools.BinlogMcp",
-            "--yes",
-            "--prerelease"
-          ],
-          "tools": ["*"]
-        }
-      }
+      "description": "High-level .NET development and MSBuild troubleshooting skills, with C# LSP integration and MSBuild binary-log replay."
     },
     { 
       "name": "dotnet-advanced",

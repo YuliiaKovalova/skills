@@ -1,18 +1,6 @@
 {
   "name": "dotnet",
   "version": "0.2.4",
-  "description": "Core C#/.NET development and MSBuild troubleshooting skills, with binary-log MCP integration.",
-  "skills": ["./skills/"],
-  "mcpServers": {
-    "binlog": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": [
-        "dnx",
-        "Microsoft.AITools.BinlogMcp",
-        "--yes",
-        "--prerelease"
-      ]
-    }
-  }
+  "description": "Core C#/.NET development and MSBuild troubleshooting skills, using MSBuild binary-log replay.",
+  "skills": ["./skills/"]
 }

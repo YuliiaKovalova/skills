@@ -10,7 +10,7 @@
     {
       "name": "dotnet",
       "source": "./plugins/dotnet",
-      "description": "High-level .NET development and MSBuild troubleshooting skills, with C# LSP and binary-log MCP integration."
+      "description": "High-level .NET development and MSBuild troubleshooting skills, with C# LSP integration and MSBuild binary-log replay."
     },
     { 
       "name": "dotnet-advanced",
