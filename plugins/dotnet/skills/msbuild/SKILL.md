@@ -31,7 +31,7 @@ an MSBuild failure.
 
 | Situation | Read | Action |
 | --- | --- | --- |
-| A build failed and a binary log exists | [binlog-failure-analysis](references/binlog-failure-analysis.md) | Replay the log with MSBuild; connect errors to the responsible project instance, target, and task. Separate root causes from cascading failures. |
+| A build failed and a binary log exists | [binlog-failure-analysis](references/binlog-failure-analysis.md) | Use available structured binlog tools, or MSBuild replay; connect errors to the responsible project instance, target, and task. Separate root causes from cascading failures. |
 | The failure needs evidence and no matching log exists | [binlog-generation](references/binlog-generation.md), then [failure analysis](references/binlog-failure-analysis.md) | Capture the original invocation once, verify the artifact, and analyze it. |
 | A project/build file has incorrect conditions, items, properties, or output paths | [msbuild-antipatterns](references/msbuild-antipatterns.md) | Select the relevant catalog entries and check their exceptions before changing anything. |
 | Imports or build hooks are missing, overwritten, or run in the wrong order | [extension-points](references/extension-points.md) | Inspect the import contract, discovery order, and packed NuGet layout rather than hiding a required failure. |
@@ -84,9 +84,10 @@ configurations, relevant consumers, and affected incremental/pack/publish behavi
 ## Shared evidence and safety
 
 - For capture-only requests, use [binlog-generation](references/binlog-generation.md), report the
-  new artifact and original exit code, and stop. For analysis, use
-  [MSBuild replay](references/binlog-failure-analysis.md#replay-a-binary-log), never binary-file
-  text parsing. Replay success and replay duration are not the recorded build's result or duration.
+  new artifact and original exit code, and stop. For analysis, use available structured binlog
+  tools or [MSBuild replay](references/binlog-failure-analysis.md#replay-a-binary-log), never
+  binary-file text parsing. Replay success and duration are not the recorded build's result or
+  duration. Needed source may be local or captured inside the supplied log.
 - Resolve these files relative to this skill. Do not load the original plugin's skills or search
   other installations/checkouts. If a bundled reference is missing, allow one listing of
   `references`, report the gap, and do not pretend its guidance was followed.
@@ -95,10 +96,15 @@ configurations, relevant consumers, and affected incremental/pack/publish behavi
   owned outputs. Keep binary and replayed logs local unless sharing is authorized.
 - Distinguish recorded facts from hypotheses. Missing source, log detail, tools, or platform
   support must be reported explicitly, not replaced with assumed values or invented verification.
+- For decisive claims, retain the project instance and trace the observed value to its input or
+  transformation. An input-file path is not its contents; a filtered or partial query is not proof
+  of absence. Bound any remaining causal gap rather than substituting a familiar explanation.
 
 ## Completion
 
 Return the selected task, the cause/bottleneck or modernization decision, supporting evidence,
 and the minimal change made or proposed. State when no change is needed. Give the exact
 verification and result, distinguishing successful, failed, and not-run checks; performance work
-also needs comparable measurements and uncertainty. Keep the response proportional to the task.
+also needs comparable measurements and uncertainty. Explain how a proposed repair preserves
+required target coverage, artifact ownership, and downstream outputs; a predicted effect is not a
+verified rebuild. Keep the response proportional to the task.
