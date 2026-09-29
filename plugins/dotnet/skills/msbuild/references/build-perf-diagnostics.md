@@ -10,7 +10,7 @@ Source: original `build-perf-diagnostics` skill.
    [binlog generation](binlog-generation.md) without changing the reported scenario.
 3. [Replay the binary log](binlog-failure-analysis.md#replay-a-binary-log) locally
    to a diagnostic text log with a performance summary. The searches below assume
-   that log is named `full.log`; use its actual path.
+   that log is named `full-01.log`, as in the replay command; use its actual path.
 4. Find expensive projects, targets, and tasks, then inspect the corresponding
    instance, execution reason, inputs, and dependency waits. Select one cause
    for a controlled change, not every plausible optimization.
@@ -188,7 +188,7 @@ Use these as investigation hints, not universal budgets or proof of a cause:
 2. Read the target/task summaries, usually near the end of the replayed log:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'Target Performance Summary|Task Performance Summary' -Context 0,50
+   Select-String -Path .\full-01.log -Pattern 'Target Performance Summary|Task Performance Summary' -Context 0,50
    ```
 
    Use the cumulative timings to select candidates, not to compute additive
@@ -196,13 +196,13 @@ Use these as investigation hints, not universal budgets or proof of a cause:
 3. Find per-project timings and instances:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'Done Building Project|Project Performance Summary' -Context 0,20
+   Select-String -Path .\full-01.log -Pattern 'Done Building Project|Project Performance Summary' -Context 0,20
    ```
 
 4. Inspect recorded scheduling evidence:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'node.*assigned|building with|scheduler'
+   Select-String -Path .\full-01.log -Pattern 'node.*assigned|building with|scheduler'
    ```
 
    These messages alone are not a utilization measurement. Report missing
@@ -210,13 +210,13 @@ Use these as investigation hints, not universal budgets or proof of a cause:
 5. Check analyzer timing, when the original capture contains it:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'Total analyzer execution time|analyzer.*elapsed|CompilerAnalyzerDriver'
+   Select-String -Path .\full-01.log -Pattern 'Total analyzer execution time|analyzer.*elapsed|CompilerAnalyzerDriver'
    ```
 
 6. Drill into the relevant project's slow target and its tasks:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'Target "CoreCompile"|Target "ResolveAssemblyReferences"' -Context 0,20
+   Select-String -Path .\full-01.log -Pattern 'Target "CoreCompile"|Target "ResolveAssemblyReferences"' -Context 0,20
    ```
 
 ## Quick Wins Checklist

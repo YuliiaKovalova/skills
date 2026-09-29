@@ -22,17 +22,38 @@ Common MSBuild targets expose hooks such as:
 ```
 
 Inspect the actual importing file and version; do not assume every targets file exposes the same
-hooks. Preserve prior values when extending a supported import list:
+hooks. Although `Import` supports semicolon-separated paths, the surrounding `Exists()` tests
+the whole property before the import runs. If any optional path in the list is absent, the
+guard can skip the entire import, including a valid new hook. Do not append a new path blindly
+to `CustomBeforeMicrosoftCommonTargets`.
+
+For a hook with one existing optional path, use an aggregation file. In an early
+`Directory.Build.props`, before the common targets consume the hook, preserve that path (or
+its optional installed default) and set the hook to the aggregation file:
 
 ```xml
 <PropertyGroup>
-  <CustomBeforeMicrosoftCommonTargets>$(CustomBeforeMicrosoftCommonTargets);$(MSBuildThisFileDirectory)MyExtension.targets</CustomBeforeMicrosoftCommonTargets>
+  <_RepoPreviousCommonTargetsHook>$(CustomBeforeMicrosoftCommonTargets)</_RepoPreviousCommonTargetsHook>
+  <_RepoPreviousCommonTargetsHook Condition="'$(_RepoPreviousCommonTargetsHook)' == ''">$(MSBuildExtensionsPath)\v$(MSBuildToolsVersion)\Custom.Before.Microsoft.Common.targets</_RepoPreviousCommonTargetsHook>
+  <CustomBeforeMicrosoftCommonTargets>$(MSBuildThisFileDirectory)BuildHooks.targets</CustomBeforeMicrosoftCommonTargets>
 </PropertyGroup>
 ```
 
-MSBuild imports support semicolon-separated paths; an `Exists()` guard does not by itself make
-such a list invalid. For a custom consumer that really accepts one file, use an aggregation file.
-In either case, verify that both existing and new hooks run in the intended order.
+Place `BuildHooks.targets` and the required `MyExtension.targets` beside that props file:
+
+```xml
+<!-- BuildHooks.targets -->
+<Project>
+  <Import Project="$(_RepoPreviousCommonTargetsHook)"
+          Condition="'$(_RepoPreviousCommonTargetsHook)' != '' and Exists('$(_RepoPreviousCommonTargetsHook)')" />
+  <Import Project="$(MSBuildThisFileDirectory)MyExtension.targets" />
+</Project>
+```
+
+The optional prior hook has its own guard; its absence cannot suppress the new required hook.
+If the prior value is already a list, inspect its contract and give each optional import its
+own guard in the aggregation file instead of passing that list to a single `Exists()`.
+Verify both the present and absent optional-hook cases, preserving the intended import order.
 
 Guard **optional** imports; required imports should fail explicitly when missing. Defaults that
 refer to installed MSBuild extensions can include a toolset/version segment for side-by-side

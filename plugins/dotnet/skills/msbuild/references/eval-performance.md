@@ -41,11 +41,12 @@ not project evaluation.
 ### Using Binlog Replay
 
 1. [Replay the existing binary log](binlog-failure-analysis.md#replay-a-binary-log)
-   locally with diagnostic verbosity and performance summaries.
+   locally with diagnostic verbosity and performance summaries. The search below uses that
+   command's `full-01.log`; substitute the actual path if you chose another name.
 2. Look for evaluation timing and instance information:
 
    ```powershell
-   Select-String -Path .\full.log -Pattern 'Project Evaluation Performance Summary|Evaluation started|Evaluation finished|Project evaluation' -Context 0,20
+   Select-String -Path .\full-01.log -Pattern 'Project Evaluation Performance Summary|Evaluation started|Evaluation finished|Project evaluation' -Context 0,20
    ```
 
 3. Record the expensive project instance, global properties, configuration,

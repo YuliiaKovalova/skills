@@ -72,7 +72,7 @@ reachability alone does not prove redundancy or an ordering bug.
 Keep `App -> Utils` if App uses its API directly, needs its metadata/build-order contract, or
 repository policy requires explicit dependencies. Remove an edge only after verifying equivalent
 compile/runtime/pack behavior and supported SDK/framework configurations. Removing this edge does
-not itself shorten the required `Utils -> Core -> App` chain.
+not itself shorten the required `App -> Core -> Utils` reference chain.
 Use [build-perf-baseline](../build-perf-baseline.md) for a measured graph experiment.
 
 ## AP-19: Side effects during evaluation

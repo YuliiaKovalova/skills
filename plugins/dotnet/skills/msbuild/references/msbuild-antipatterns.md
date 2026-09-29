@@ -28,6 +28,9 @@ containing target incremental.
 <Target Name="PrepareOutput">
   <MakeDir Directories="$(OutputPath)logs" />
   <Copy SourceFiles="config.json" DestinationFolder="$(OutputPath)" />
+  <ItemGroup>
+    <TempFiles Include="$(IntermediateOutputPath)*.tmp" />
+  </ItemGroup>
   <Delete Files="@(TempFiles)" />
 </Target>
 ```
@@ -248,6 +251,11 @@ the whole repository while fixing an unrelated build.
 </Target>
 <Target Name="SignAssemblies" AfterTargets="Build" DependsOnTargets="CopyLicense"
         Condition="'$(SignAssemblies)' == 'true'">
+  <ItemGroup>
+    <AssemblyFiles Include="$(OutputPath)*.dll" />
+  </ItemGroup>
+  <Error Condition="'@(AssemblyFiles)' == ''"
+         Text="Signing was requested, but no assemblies were found in '$(OutputPath)'." />
   <Exec Command="signtool sign /f cert.pfx &quot;%(AssemblyFiles.Identity)&quot;" />
 </Target>
 ```
@@ -259,6 +267,8 @@ with a stable input fingerprint as in [AP-11's example](antipatterns/incremental
 
 Preserve original target order, supported platforms, required tools, and copy semantics.
 `SkipUnchangedFiles` is appropriate only when its timestamp/size heuristic satisfies the contract.
+Discover the assemblies inside the signing target, after the build has produced them, rather
+than with an evaluation-time glob. This retains the original output-directory DLL selection.
 
 ## AP-11: Untracked artifact-producing targets
 

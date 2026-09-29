@@ -84,11 +84,13 @@ Use binlogs to identify exactly why a target executed instead of skipping.
    Analyze the second successful build. `Rebuild` and `--no-incremental` force
    full work and cannot establish a no-change skip result.
 2. [Replay the second binlog](binlog-failure-analysis.md#replay-a-binary-log)
-   locally with diagnostic verbosity and a performance summary.
+   locally with diagnostic verbosity and a performance summary, substituting `second.binlog`
+   for `build.binlog`. The searches below use that command's `full-01.log`; substitute the
+   actual path if you chose another name. Replay the first build to a different file when comparing.
 3. Find executed/skipped targets and the accompanying reasons:
 
    ```powershell
-   Select-String -Path .\second-full.log -Pattern 'Building target|Skipping target|was not skipped|is newer than output' -Context 0,5
+   Select-String -Path .\full-01.log -Pattern 'Building target|Skipping target|was not skipped|is newer than output' -Context 0,5
    ```
 
 4. Interpret messages in context:
@@ -107,7 +109,7 @@ Use binlogs to identify exactly why a target executed instead of skipping.
 - Find expensive second-build targets:
 
   ```powershell
-  Select-String -Path .\second-full.log -Pattern 'Target Performance Summary|Task Performance Summary' -Context 0,30
+  Select-String -Path .\full-01.log -Pattern 'Target Performance Summary|Task Performance Summary' -Context 0,30
   ```
 
 - Aggregate/nested timings are not additive wall time. Follow orchestration waits
