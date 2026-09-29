@@ -15,9 +15,12 @@ stimuli:
         - src: fixtures/missing-schema/Build.proj
           dest: Build.proj
       commands:
-        - dotnet msbuild Build.proj -t:Build -p:Configuration=Release -p:SchemaFile=schemas/prod.json -bl:failure.binlog > capture.log 2>&1 || test -s failure.binlog
-        - grep -q 'SCHEMA1001' capture.log
-        - rm Build.proj capture.log
+        - dotnet msbuild Build.proj -t:Build -p:Configuration=Release -p:SchemaFile=schemas/prod.json -bl:failure.binlog > capture.log 2>&1 || exit 0
+        - >-
+          node -e "const fs=require('fs'); const log=fs.statSync('failure.binlog');
+          if (log.isFile() === false || log.size === 0) throw new Error('Expected a nonempty failure.binlog');
+          if (fs.readFileSync('capture.log','utf8').includes('SCHEMA1001') === false) throw new Error('Expected build failure SCHEMA1001');
+          fs.unlinkSync('Build.proj'); fs.unlinkSync('capture.log');"
     graders:
       - type: output-contains
         config:
