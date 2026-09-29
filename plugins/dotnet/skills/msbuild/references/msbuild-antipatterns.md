@@ -246,8 +246,10 @@ the whole repository while fixing an unrelated build.
     <FileWrites Include="$(IntermediateOutputPath)version.txt" />
   </ItemGroup>
 </Target>
-<Target Name="CopyLicense" AfterTargets="Build">
-  <Copy SourceFiles="LICENSE" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+<Target Name="CopyLicense" AfterTargets="CopyFilesToOutputDirectory">
+  <Copy SourceFiles="LICENSE" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true">
+    <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+  </Copy>
 </Target>
 <Target Name="SignAssemblies" AfterTargets="Build" DependsOnTargets="CopyLicense"
         Condition="'$(SignAssemblies)' == 'true'">
@@ -267,6 +269,9 @@ with a stable input fingerprint as in [AP-11's example](antipatterns/incremental
 
 Preserve original target order, supported platforms, required tools, and copy semantics.
 `SkipUnchangedFiles` is appropriate only when its timestamp/size heuristic satisfies the contract.
+Register the copied destinations in `FileWrites` before MSBuild records them for a subsequent
+`Clean`. Hooking `CopyLicense` after `CopyFilesToOutputDirectory` does this even for unchanged
+copies; registering them in an `AfterTargets="Build"` target would be too late.
 Discover the assemblies inside the signing target, after the build has produced them, rather
 than with an evaluation-time glob. This retains the original output-directory DLL selection.
 
