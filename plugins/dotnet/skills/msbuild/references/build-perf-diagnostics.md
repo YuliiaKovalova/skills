@@ -128,10 +128,16 @@ Use these as investigation hints, not universal budgets or proof of a cause:
 - **Skip unchanged files:** inspect whether the actual target consumes
   `SkipCopyUnchangedFiles`; it may already be true. Custom `Copy` tasks expose
   `SkipUnchangedFiles`. Neither setting is a content-hash comparison.
-- **Hardlinks:** `CreateHardLinksForCopyFilesToOutputDirectoryIfPossible=true`
-  can help compatible same-volume, immutable-file workloads. A destination
-  mutation through a hardlink can modify its source, so do not use this for
-  writable/resettable content.
+- **Hardlinks:** identify the expensive copy target in the binlog, then consider
+  setting only the property that target consumes to `true`:
+  `CreateHardLinksForCopyFilesToOutputDirectoryIfPossible` for primary build
+  outputs, `CreateHardLinksForAdditionalFilesIfPossible` for content/additional
+  files, or `CreateHardLinksForCopyLocalIfPossible` for copy-local references.
+  For custom `Copy` tasks, inspect their `UseHardlinksIfPossible` parameter.
+  Confirm the effective value on the hot task; the primary-output property does
+  not control every copy target. Hardlinks can help compatible same-volume,
+  immutable-file workloads. A destination mutation through a hardlink can modify
+  its source, so do not use this for writable/resettable content.
 - **Shared layout:** `UseCommonOutputDirectory=true` assumes a genuinely shared,
   collision-free output layout. Verify ownership and consumers first.
   [Artifacts output](build-perf-baseline.md#step-2-artifacts-output-layout), including

@@ -93,13 +93,15 @@ Use binlogs to identify exactly why a target executed instead of skipping.
    Select-String -Path .\full-01.log -Pattern 'Building target|Skipping target|was not skipped|is newer than output' -Context 0,5
    ```
 
-4. Interpret messages in context:
-   - **"Building target completely":** full target execution; read the reason
+4. Interpret messages in context (`...` stands for the target name):
+   - **`Building target "..." completely.`:** full target execution; read the reason
      instead of assuming all outputs were missing.
-   - **"Building target incrementally":** partial execution for an applicable
+   - **`Building target "..." partially, because some output files are out of date
+     with respect to their input files.`:** partial execution for an applicable
      input/output mapping.
-   - **"Skipping target ... all output files are up-to-date":** freshness checks
-     permitted a skip; verify the declared dependency set is complete.
+   - **`Skipping target "..." because all output files are up-to-date with respect
+     to the input files.`:** freshness checks permitted a skip; verify the declared
+     dependency set is complete.
 5. Record the precise input/output path, timestamp, missing output, or condition
    responsible, for the correct project/global-property instance.
 
