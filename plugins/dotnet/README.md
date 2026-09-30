@@ -31,6 +31,10 @@ skills in the [dotnet-msbuild plugin](../dotnet-msbuild/README.md). The existing
 plugin's skills and agents remain supported, unchanged alternative entry points;
 installing both plugins does not require running both workflows for one task.
 
+Authoring cleanup preserves the current framework and project system. Framework
+upgrades, legacy-project conversion, package-format migration, and C# source
+refactoring are outside this entry's scope.
+
 The bundled references and specialist skills share MSBuild owners. Review shared-guidance
 updates against both surfaces and track applicable backports with their corresponding
 evals rather than maintaining independent guidance. This consolidation leaves specialist
